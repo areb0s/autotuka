@@ -1,0 +1,1905 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>티카투카 전략 도우미 (TikaTuka Helper)</title>
+<style>
+  :root {
+    --wood-dark: #2a1a10;
+    --wood-mid: #4a2e1f;
+    --wood-light: #6b4226;
+    --wood-grain: #3a2418;
+    --green-tray: #3a5a3a;
+    --green-tray-2: #2d4a2d;
+    --red-tray: #6b2828;
+    --red-tray-2: #4a1a1a;
+    --gold: #d4a960;
+    --gold-bright: #f4d089;
+    --text: #f0e4d0;
+    --muted: #a89878;
+    --good: #7ed957;
+    --bad: #ff6b6b;
+    --shield: #59c2ff;
+    --panel: rgba(20, 12, 8, 0.85);
+    --panel-border: #6b4226;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+    background:
+      radial-gradient(ellipse at center, #3a2418 0%, #1a0f08 100%);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 12px;
+    overflow-x: hidden;
+  }
+
+  .app {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 16px;
+  }
+  @media (max-width: 1100px) {
+    .app { grid-template-columns: 1fr; }
+  }
+
+  /* ============ GAME BOARD (left) ============ */
+  .game-board {
+    background:
+      repeating-linear-gradient(
+        90deg,
+        #3a2418 0px,
+        #4a2e1f 2px,
+        #3a2418 4px,
+        #4a2e1f 8px
+      ),
+      linear-gradient(180deg, #4a2e1f 0%, #2a1a10 100%);
+    border: 4px solid #1a0f08;
+    border-radius: 16px;
+    padding: 14px;
+    position: relative;
+    box-shadow: 0 0 40px rgba(0,0,0,0.6), inset 0 0 60px rgba(0,0,0,0.4);
+  }
+
+  /* Top bar - players */
+  .top-bar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    margin-bottom: 14px;
+    gap: 10px;
+  }
+  .player-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 30px;
+    background: linear-gradient(135deg, rgba(0,0,0,0.6), rgba(0,0,0,0.3));
+    border: 2px solid var(--gold);
+    position: relative;
+  }
+  .player-card.me { background: linear-gradient(90deg, rgba(74,46,31,0.95), rgba(20,40,20,0.7)); }
+  .player-card.opp {
+    background: linear-gradient(270deg, rgba(74,46,31,0.95), rgba(74,28,28,0.7));
+    flex-direction: row-reverse;
+    text-align: right;
+  }
+  .player-avatar {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #8a6440, #5a3a20);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+    border: 2px solid var(--gold-bright);
+    flex-shrink: 0;
+  }
+  .player-card.opp .player-avatar {
+    background: linear-gradient(135deg, #aa4040, #6a2020);
+  }
+  .player-info { display: flex; flex-direction: column; gap: 2px; }
+  .player-name { font-weight: bold; font-size: 14px; color: var(--gold-bright); }
+  .turn-tag {
+    font-size: 10px;
+    background: #2ea34d;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: fit-content;
+  }
+  .player-card.opp .turn-tag { background: #c0392b; }
+  .turn-tag.hidden { visibility: hidden; }
+
+  .game-title {
+    text-align: center;
+    padding: 0 20px;
+  }
+  .game-title h1 {
+    margin: 0;
+    font-size: 22px;
+    color: var(--gold-bright);
+    text-shadow: 2px 2px 0 #2a1a10, 0 0 10px rgba(212,169,96,0.5);
+    letter-spacing: 1px;
+  }
+  .game-title .sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* Playing field - main grid */
+  .field {
+    display: grid;
+    grid-template-columns: 90px 1fr 90px 1fr 90px;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  /* Side trays (dice pools) */
+  .tray {
+    border-radius: 12px;
+    padding: 10px 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 3px solid #1a0f08;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+    min-height: 360px;
+    position: relative;
+  }
+  .tray.me-tray {
+    background:
+      linear-gradient(180deg, var(--green-tray) 0%, var(--green-tray-2) 100%);
+  }
+  .tray.opp-tray {
+    background:
+      linear-gradient(180deg, var(--red-tray) 0%, var(--red-tray-2) 100%);
+  }
+  .tray-label {
+    font-size: 10px;
+    color: rgba(255,255,255,0.6);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+
+  /* Lines column */
+  .lines-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .line {
+    background:
+      linear-gradient(180deg, rgba(20,12,8,0.6), rgba(40,24,16,0.4));
+    border: 2px solid rgba(212,169,96,0.4);
+    border-radius: 10px;
+    padding: 10px;
+    min-height: 110px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .line.me.selectable { cursor: pointer; }
+  .line.me.selectable:hover {
+    border-color: var(--gold-bright);
+    background: linear-gradient(180deg, rgba(40,24,16,0.8), rgba(60,36,20,0.6));
+    box-shadow: 0 0 15px rgba(212,169,96,0.3);
+  }
+  .line.me.recommended {
+    border-color: var(--gold-bright);
+    box-shadow: 0 0 25px rgba(244,208,137,0.7), inset 0 0 15px rgba(244,208,137,0.2);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 25px rgba(244,208,137,0.7), inset 0 0 15px rgba(244,208,137,0.2); }
+    50%      { box-shadow: 0 0 35px rgba(244,208,137,1.0), inset 0 0 20px rgba(244,208,137,0.4); }
+  }
+  .line.opp.selectable { cursor: crosshair; }
+  .line.opp.selectable:hover {
+    border-color: #ff8888;
+    background: linear-gradient(180deg, rgba(60,20,20,0.6), rgba(80,30,30,0.4));
+  }
+  .line.full { opacity: 0.6; }
+  .line .slot-ghost {
+    width: 50px; height: 50px;
+    border: 2px dashed rgba(255,255,255,0.1);
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  /* Center score column */
+  .scores-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .score-row {
+    flex: 1;
+    min-height: 110px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    font-family: "Georgia", serif;
+    font-weight: bold;
+    font-size: 22px;
+  }
+  .score-row .me-score,
+  .score-row .opp-score {
+    min-width: 32px;
+    text-align: center;
+    color: var(--muted);
+    transition: all 0.2s;
+  }
+  .score-row .me-score.winning { color: var(--good); text-shadow: 0 0 10px rgba(126,217,87,0.6); }
+  .score-row .opp-score.winning { color: var(--bad); text-shadow: 0 0 10px rgba(255,107,107,0.6); }
+  .score-row .arrow {
+    margin: 0 6px;
+    color: var(--muted);
+    font-size: 18px;
+  }
+  .score-row .arrow.me { color: var(--good); }
+  .score-row .arrow.opp { color: var(--bad); }
+
+  /* Dice - 흰 본체, pip 색으로 소유자 구분 */
+  .dice {
+    width: 50px; height: 50px;
+    background: linear-gradient(135deg, #f5e8d0 0%, #d4c0a0 100%);
+    color: #2a1a10;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 24px;
+    border: 2px solid #8a6440;
+    position: relative;
+    flex-shrink: 0;
+    box-shadow:
+      inset 2px 2px 0 rgba(255,255,255,0.4),
+      inset -2px -2px 0 rgba(0,0,0,0.15),
+      2px 3px 4px rgba(0,0,0,0.4);
+    font-family: "Georgia", serif;
+  }
+  .dice.face {
+    display: grid;
+    grid-template: repeat(3,1fr) / repeat(3,1fr);
+    gap: 2px;
+    padding: 6px;
+    color: transparent;
+  }
+  .dice .pip {
+    background: #2a1a10;
+    border-radius: 50%;
+    width: 100%;
+    height: 100%;
+  }
+  /* 소유자별 pip 색상 */
+  .dice.owner-me .pip {
+    background: #2ea34d;
+    box-shadow: 0 0 3px rgba(46, 163, 77, 0.6);
+  }
+  .dice.owner-opp .pip {
+    background: #c0392b;
+    box-shadow: 0 0 3px rgba(192, 57, 43, 0.6);
+  }
+  /* 실드 = 굵은 황금 테두리 + 글로우 (배경은 그대로) */
+  .dice.shield {
+    border: 3px solid var(--gold-bright);
+    box-shadow:
+      inset 2px 2px 0 rgba(255,255,255,0.4),
+      inset -2px -2px 0 rgba(0,0,0,0.15),
+      2px 3px 4px rgba(0,0,0,0.4),
+      0 0 10px rgba(244,208,137,0.7),
+      inset 0 0 8px rgba(244,208,137,0.3);
+    padding: 5px; /* border 3px 보정 */
+  }
+  .dice.shield::before {
+    content: "🛡";
+    position: absolute;
+    top: -10px;
+    left: -8px;
+    font-size: 12px;
+    background: var(--gold);
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #2a1a10;
+    z-index: 2;
+  }
+  .dice.recent {
+    animation: recentGlow 1.5s ease-out;
+  }
+  @keyframes recentGlow {
+    0%   { box-shadow: 0 0 25px var(--gold-bright), inset 0 0 15px rgba(244,208,137,0.4); transform: scale(1.15); }
+    100% { box-shadow: inset 2px 2px 0 rgba(255,255,255,0.4), inset -2px -2px 0 rgba(0,0,0,0.15), 2px 3px 4px rgba(0,0,0,0.4); transform: scale(1); }
+  }
+  /* 상대 영역에 있는 내 주사위 / 내 영역에 있는 상대 주사위 표시 */
+  .dice.misplaced {
+    outline: 2px dashed currentColor;
+    outline-offset: 1px;
+  }
+  .dice.misplaced.owner-me { color: #2ea34d; }
+  .dice.misplaced.owner-opp { color: #c0392b; }
+  .dice .remove-btn {
+    position: absolute;
+    top: -8px; right: -8px;
+    background: var(--bad);
+    color: white;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    border: 1px solid white;
+    line-height: 1;
+  }
+  .line:hover .dice .remove-btn { opacity: 1; }
+
+  /* Current die in tray */
+  .tray .dice {
+    cursor: default;
+    animation: float 2s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
+  .tray .dice.empty {
+    background: rgba(255,255,255,0.05);
+    border: 2px dashed rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.3);
+    box-shadow: none;
+    animation: none;
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+    padding: 8px 14px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .status-bar .item { color: var(--muted); }
+  .status-bar .item strong { color: var(--gold-bright); font-size: 14px; margin-right: 4px; }
+
+  /* ============ CONTROL PANEL (right) ============ */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .panel h2 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--gold-bright);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .panel.recommend {
+    border: 2px solid var(--gold);
+    background:
+      linear-gradient(135deg, rgba(212,169,96,0.15) 0%, rgba(20,12,8,0.85) 100%);
+  }
+  .rec-action {
+    font-size: 18px;
+    color: var(--gold-bright);
+    font-weight: bold;
+    margin-bottom: 6px;
+  }
+  .rec-reasons {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .rec-reasons div { margin-bottom: 2px; }
+  .winrate-bar {
+    background: rgba(0,0,0,0.4);
+    border-radius: 4px;
+    height: 10px;
+    overflow: hidden;
+    margin-top: 10px;
+    border: 1px solid var(--panel-border);
+  }
+  .winrate-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--bad) 0%, #f4d089 50%, var(--good) 100%);
+    transition: width 0.3s;
+    box-shadow: 0 0 10px rgba(244,208,137,0.5);
+  }
+  .winrate-label {
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+  }
+  .winrate-label .pct {
+    color: var(--gold-bright);
+    font-weight: bold;
+    font-size: 14px;
+  }
+
+  /* Dice input */
+  .input-mode {
+    display: flex;
+    background: rgba(0,0,0,0.4);
+    border-radius: 6px;
+    padding: 3px;
+    margin-bottom: 10px;
+    border: 1px solid var(--panel-border);
+  }
+  .input-mode button {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    padding: 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+  }
+  .input-mode button.active {
+    background: var(--gold);
+    color: #2a1a10;
+  }
+
+  .picker {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+  .picker button {
+    background: linear-gradient(135deg, #6b4226 0%, #4a2e1f 100%);
+    border: 1px solid var(--gold);
+    color: var(--gold-bright);
+    padding: 10px 0;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 16px;
+    font-family: "Georgia", serif;
+  }
+  .picker button:hover { background: linear-gradient(135deg, #8a5430 0%, #6b4226 100%); }
+  .picker button.active {
+    background: linear-gradient(135deg, var(--gold-bright) 0%, var(--gold) 100%);
+    color: #2a1a10;
+    box-shadow: 0 0 10px rgba(244,208,137,0.6);
+  }
+
+  .shield-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .shield-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .shield-row input[type="checkbox"] { accent-color: var(--shield); }
+
+  /* Move list */
+  .moves {
+    font-size: 12px;
+  }
+  .move {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(212,169,96,0.15);
+    transition: background 0.15s;
+  }
+  .move:last-child { border-bottom: none; }
+  .move.best {
+    background: linear-gradient(90deg, rgba(212,169,96,0.2), transparent);
+    color: var(--gold-bright);
+    font-weight: bold;
+  }
+  .move .lbl { display: flex; align-items: center; gap: 6px; }
+  .move .wr { font-family: "Courier New", monospace; font-size: 13px; }
+  .move .wr-good { color: var(--good); }
+  .move .wr-bad { color: var(--bad); }
+
+  /* Buttons */
+  .btn {
+    background: linear-gradient(135deg, var(--gold-bright), var(--gold));
+    border: 1px solid #8a6440;
+    color: #2a1a10;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn.secondary {
+    background: linear-gradient(135deg, #6b4226, #4a2e1f);
+    color: var(--gold-bright);
+  }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .setup-btn.active {
+    background: linear-gradient(135deg, var(--gold-bright), var(--gold)) !important;
+    color: #2a1a10 !important;
+    box-shadow: 0 0 8px rgba(244,208,137,0.5);
+  }
+
+  /* Logo "TikaTuka" decoration */
+  .game-title h1::before { content: "🎲 "; }
+  .game-title h1::after  { content: " 🎲"; }
+
+  /* Help & log */
+  .help {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .help strong { color: var(--text); }
+  .log {
+    font-size: 11px;
+    color: var(--muted);
+    max-height: 100px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.4);
+    padding: 8px;
+    border-radius: 6px;
+    font-family: "Courier New", monospace;
+    border: 1px solid var(--panel-border);
+  }
+  .log div { margin-bottom: 2px; }
+
+  /* Settings */
+  .setting {
+    margin-bottom: 8px;
+  }
+  .setting label {
+    font-size: 11px;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 3px;
+  }
+  .setting select,
+  .setting input[type="range"] {
+    width: 100%;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    padding: 4px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .badge {
+    background: rgba(212,169,96,0.2);
+    color: var(--gold-bright);
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    margin-left: 4px;
+  }
+
+  /* Confetti for victory (subtle) */
+  .game-over-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .game-over-overlay.show { display: flex; }
+  .game-over-overlay .result {
+    font-size: 60px;
+    font-weight: bold;
+    text-shadow: 0 0 30px currentColor;
+    font-family: "Georgia", serif;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ====== LEFT: BOARD ====== -->
+  <div>
+    <div class="game-board">
+      <!-- Top: players + title -->
+      <div class="top-bar">
+        <div class="player-card me">
+          <div class="player-avatar">🧙</div>
+          <div class="player-info">
+            <div class="turn-tag" id="turnTagMe">✊ TURN</div>
+            <div class="player-name" id="meName">나</div>
+          </div>
+        </div>
+
+        <div class="game-title">
+          <h1>TikaTuka</h1>
+          <div class="sub">티카투카 전략 도우미</div>
+        </div>
+
+        <div class="player-card opp">
+          <div class="player-avatar">🧔</div>
+          <div class="player-info">
+            <div class="turn-tag hidden" id="turnTagOpp">TURN ✊</div>
+            <div class="player-name" id="oppName">주사위좀굴림</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Field -->
+      <div class="field">
+        <!-- My tray -->
+        <div class="tray me-tray">
+          <div class="tray-label">내 주사위</div>
+          <div id="myTrayDie" class="dice empty">?</div>
+          <div class="help" style="text-align:center;font-size:10px;">눈 선택 후<br>라인 클릭</div>
+        </div>
+
+        <!-- My lines -->
+        <div class="lines-col" id="myLinesCol">
+          <div class="line me selectable" data-side="me" data-line="0"></div>
+          <div class="line me selectable" data-side="me" data-line="1"></div>
+          <div class="line me selectable" data-side="me" data-line="2"></div>
+        </div>
+
+        <!-- Center scores -->
+        <div class="scores-col" id="scoresCol">
+          <div class="score-row" data-row="0">
+            <span class="me-score">0</span>
+            <span class="arrow">—</span>
+            <span class="opp-score">0</span>
+          </div>
+          <div class="score-row" data-row="1">
+            <span class="me-score">0</span>
+            <span class="arrow">—</span>
+            <span class="opp-score">0</span>
+          </div>
+          <div class="score-row" data-row="2">
+            <span class="me-score">0</span>
+            <span class="arrow">—</span>
+            <span class="opp-score">0</span>
+          </div>
+        </div>
+
+        <!-- Opp lines -->
+        <div class="lines-col" id="oppLinesCol">
+          <div class="line opp selectable" data-side="opp" data-line="0"></div>
+          <div class="line opp selectable" data-side="opp" data-line="1"></div>
+          <div class="line opp selectable" data-side="opp" data-line="2"></div>
+        </div>
+
+        <!-- Opp tray -->
+        <div class="tray opp-tray">
+          <div class="tray-label">상대 주사위</div>
+          <div id="oppTrayDie" class="dice empty">?</div>
+          <div class="help" style="text-align:center;font-size:10px;">상대 모드로<br>전환 후 입력</div>
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div class="status-bar">
+        <div class="item"><strong id="lineWins">0 : 0</strong>라인 승</div>
+        <div class="item"><strong id="totalScore">0 : 0</strong>총점</div>
+        <div class="item"><strong id="slotsLeft">9 : 9</strong>남은 슬롯</div>
+        <div class="item"><strong id="turnNum">1</strong>턴</div>
+      </div>
+
+      <!-- Legend -->
+      <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; padding:8px 14px; background:rgba(0,0,0,0.3); border-radius:8px; font-size:11px; color:var(--muted); justify-content:center;">
+        <span style="display:flex; align-items:center; gap:4px;">
+          <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#2ea34d;"></span>
+          내 주사위 (초록 눈)
+        </span>
+        <span style="display:flex; align-items:center; gap:4px;">
+          <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#c0392b;"></span>
+          상대 주사위 (빨강 눈)
+        </span>
+        <span style="display:flex; align-items:center; gap:4px;">
+          <span style="display:inline-block; width:14px; height:14px; border:2px solid var(--gold-bright); border-radius:3px; background:#f5e8d0;"></span>
+          🛡 실드 (황금 테두리)
+        </span>
+        <span style="display:flex; align-items:center; gap:4px;">
+          <span style="display:inline-block; width:14px; height:14px; border:2px solid #aaa; outline:1px dashed #c0392b; outline-offset:1px; border-radius:3px; background:#f5e8d0;"></span>
+          상대 영역에 있는 내 주사위 (점선)
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== RIGHT: CONTROL PANEL ====== -->
+  <div>
+
+    <div class="panel">
+      <h2>🔄 게임 관리</h2>
+      <div class="setting">
+        <label>선공</label>
+        <div style="display:flex; gap:4px;">
+          <button class="btn secondary setup-btn active" data-firstmover="me" style="flex:1; font-size:11px;">🟢 내가 선공</button>
+          <button class="btn secondary setup-btn" data-firstmover="opp" style="flex:1; font-size:11px;">🔴 상대 선공</button>
+        </div>
+      </div>
+      <div class="setting" style="margin-top:8px;">
+        <label>리롤 보유 (3성 이상에서 사용)</label>
+        <div style="display:flex; gap:10px; font-size:11px; align-items:center; padding:6px; background:rgba(0,0,0,0.3); border-radius:6px;">
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" id="meHasReroll" checked />
+            <span style="color:var(--good);">🟢 내 리롤</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" id="oppHasReroll" checked />
+            <span style="color:var(--bad);">🔴 상대 리롤</span>
+          </label>
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:10px;">
+        <button class="btn" id="newGameBtn" style="flex:1;">🆕 새 게임 시작</button>
+        <button class="btn secondary" id="undoBtn">↶ 무르기</button>
+      </div>
+    </div>
+
+    <div class="panel recommend">
+      <h2>💡 추천 수</h2>
+      <div class="rec-action" id="recAction">주사위를 입력하세요</div>
+      <div class="rec-reasons" id="recReasons">— 알고리즘이 모든 배치 위치를 평가하여<br>실시간으로 최적 수를 추천합니다.</div>
+      <div class="winrate-bar"><div class="winrate-fill" id="winrateFill" style="width:0%"></div></div>
+      <div class="winrate-label">
+        <span>예상 승률</span>
+        <span class="pct" id="winrateText">—</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>🎲 주사위 입력</h2>
+      <div class="input-mode" id="inputMode">
+        <button data-mode="me" class="active">내 주사위</button>
+        <button data-mode="opp">상대 주사위</button>
+      </div>
+      <div class="picker" id="picker">
+        <button data-val="1">⚀</button>
+        <button data-val="2">⚁</button>
+        <button data-val="3">⚂</button>
+        <button data-val="4">⚃</button>
+        <button data-val="5">⚄</button>
+        <button data-val="6">⚅</button>
+      </div>
+      <div class="shield-row">
+        <label><input type="checkbox" id="shieldCheck" /> 🛡️ 실드 주사위</label>
+        <span class="badge" id="modeBadge">내 차례</span>
+      </div>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <button class="btn secondary" id="rerollBtn" style="flex:1; font-size:11px; border-left:3px solid var(--good);">
+          🎲 내 리롤<br><span style="font-size:10px; opacity:0.8;">(<span id="rerollLeftMe">1</span> 남음)</span>
+        </button>
+        <button class="btn secondary" id="oppRerollBtn" style="flex:1; font-size:11px; border-left:3px solid var(--bad);">
+          🎲 상대 리롤<br><span style="font-size:10px; opacity:0.8;">(<span id="rerollLeftOpp">1</span> 남음)</span>
+        </button>
+      </div>
+      <div class="help" style="margin-top:6px;">
+        <strong>1.</strong> 모드 선택 (내/상대) →
+        <strong>2.</strong> 눈 클릭 →
+        <strong>3.</strong> 보드의 해당 라인 클릭<br>
+        <span style="color:var(--gold-bright);">💥 알까기 시 추가 주사위 1회 (실드)<br>
+        ⚡ 보너스 주사위는 상대 라인에도 배치 가능<br>
+        🎲 리롤은 게임 당 1회씩 (나/상대 각각)</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>⚙️ 설정</h2>
+      <div class="setting">
+        <label>몬테카를로 시뮬레이션: <span id="simCountLabel">300</span>회</label>
+        <input type="range" id="simCount" min="50" max="1500" value="300" step="50" />
+      </div>
+      <div class="setting">
+        <label>상대 NPC 난이도</label>
+        <select id="oppLevel">
+          <option value="1">⭐ 1성 (랜덤)</option>
+          <option value="2" selected>⭐⭐ 2성 (휴리스틱)</option>
+          <option value="3">⭐⭐⭐ 3성 (리롤 보유)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>📜 로그</h2>
+      <div class="log" id="log"></div>
+    </div>
+
+  </div>
+</div>
+
+<div class="game-over-overlay" id="gameOverOverlay">
+  <div class="result" id="gameOverResult"></div>
+  <div style="font-size: 18px; color: var(--muted);" id="gameOverDetail"></div>
+  <button class="btn" onclick="document.getElementById('gameOverOverlay').classList.remove('show')">닫기</button>
+</div>
+
+<script>
+/* =========================================================
+   티카투카 로직 + 추천 엔진
+   ========================================================= */
+
+const MAX_DICE_PER_LINE = 3;
+
+let state = {
+  me:  [[], [], []],
+  opp: [[], [], []],
+  currentDie: null,
+  currentShield: false,
+  inputMode: 'me',          // 'me' or 'opp' - 누구의 주사위를 입력 중인지
+  placeTarget: 'own',       // 'own' or 'cross' - 자기 라인 vs 상대 라인 (알까기 보너스 시)
+  turnNum: 1,
+  history: [],
+  lastPlaced: null,         // {side, line, idx} for "recent" glow
+  pendingExtra: false,      // 알까기 성공 → 추가 주사위 굴려야 하는 상태
+  firstMoveDone: false,     // 선공 첫 주사위(=실드) 처리용
+  rerollLeft: { me: 1, opp: 1 },  // 게임 당 1회씩 리롤 가능
+};
+
+/* ---------- Scoring: 티카투카 정확한 공식 ----------
+   n개 같은 눈 = val × (2n - 1) × n ÷ ... 아니, 실제 검증:
+   1개 = val (예: 6 → 6)
+   2개 = val × 3 (예: 6,6 → 18)
+   3개 = val × 5 (예: 6,6,6 → 30)
+   즉, n개 일 때 "값 그룹 점수" = val × (2n - 1)
+   라인 점수 = 모든 값 그룹 점수의 합
+*/
+/* 한 라인의 영역별 점수 계산
+   - ⭐ 점수는 영역(area) 기준으로 계산 (owner 무관)
+   - 보너스로 상대 영역에 놓인 내 주사위는 → 상대 점수로 계산됨
+   - 즉, 상대 영역에 놓는 것은 상대 점수를 올려주는 셈
+   - 그러나 슬롯 차단 효과 (상대 활로 막기) 가 더 큼
+*/
+function lineScoreByOwner(meArea, oppArea) {
+  const scoreOf = (dice) => {
+    if (!dice.length) return 0;
+    const counts = {};
+    for (const d of dice) counts[d.val] = (counts[d.val] || 0) + 1;
+    let total = 0;
+    for (const val in counts) {
+      const n = counts[val];
+      total += parseInt(val) * (2 * n - 1);
+    }
+    return total;
+  };
+  // 영역에 있는 모든 주사위를 그 영역 owner의 점수로 합산
+  return { me: scoreOf(meArea), opp: scoreOf(oppArea) };
+}
+
+// 단일 배열 점수 (시뮬레이션 등에서 owner 무관하게 쓸 일 있을 때)
+function lineScoreS(dice) {
+  if (!dice.length) return 0;
+  const counts = {};
+  for (const d of dice) counts[d.val] = (counts[d.val] || 0) + 1;
+  let total = 0;
+  for (const val in counts) {
+    const n = counts[val];
+    total += parseInt(val) * (2 * n - 1);
+  }
+  return total;
+}
+
+function lineScore(idx, owner='me', s = state) {
+  return lineScoreByOwner(s.me[idx], s.opp[idx])[owner];
+}
+
+function totalScores(s = state) {
+  let m=0, o=0;
+  for (let i=0; i<3; i++) {
+    const sc = lineScoreByOwner(s.me[i], s.opp[i]);
+    m += sc.me; o += sc.opp;
+  }
+  return { me: m, opp: o };
+}
+function lineWinCounts(s = state) {
+  let mw=0, ow=0;
+  for (let i=0; i<3; i++) {
+    const sc = lineScoreByOwner(s.me[i], s.opp[i]);
+    if (sc.me > sc.opp) mw++;
+    else if (sc.opp > sc.me) ow++;
+  }
+  return { me: mw, opp: ow };
+}
+function isGameOver(s = state) {
+  for (let i=0; i<3; i++) {
+    if (s.me[i].length < MAX_DICE_PER_LINE) return false;
+    if (s.opp[i].length < MAX_DICE_PER_LINE) return false;
+  }
+  return true;
+}
+function gameWinner(s = state) {
+  const lw = lineWinCounts(s);
+  if (lw.me > lw.opp) return 'me';
+  if (lw.opp > lw.me) return 'opp';
+  const ts = totalScores(s);
+  if (ts.me > ts.opp) return 'me';
+  if (ts.opp > ts.me) return 'opp';
+  return 'tie';
+}
+
+/* ---------- Placement + knockoff ----------
+   티카투카 알까기 룰 (사용자 확인):
+   - 주사위는 owner(소유자: 'me'|'opp')와 위치(어느 라인)가 분리됨
+   - 보너스 주사위는 상대 라인에도 배치 가능 → owner와 위치가 다를 수 있음
+   - 알까기 판정: "다른 소유자"의 동일 val 비실드 주사위를 같은 라인에서 제거
+   - 알까기 성공 시 방금 놓은 내 주사위도 함께 사라짐
+   - 추가 주사위 1회 (실드) 보너스, 같은 owner의 턴 유지
+   - placerSide: 누가 두는지 (보너스 시 주사위 owner)
+   - placeLine: 어느 라인 슬롯 ('me' 영역 or 'opp' 영역)
+*/
+function placeDie(s, placerSide, placeArea, lineIdx, die) {
+  // die: { val, shield, owner }
+  const line = s[placeArea][lineIdx];
+  if (line.length >= MAX_DICE_PER_LINE) return { removed: 0, selfRemoved: false };
+  line.push(die);
+
+  // 알까기 판정:
+  // - ⭐ 실드 주사위는 공격(알까기) 불가 (방어 면역 + 공격 불가)
+  // - 같은 라인의 상대 영역에서 동일 val의 비실드 주사위 제거
+  // - 보너스로 상대 영역에 놓인 내 주사위도 owner 기준으로 알까기 대상
+  let removed = 0;
+  if (!die.shield) {
+    // 상대 영역 (placeArea 반대편)만 검사 — 알까기는 같은 라인의 상대 영역에만 적용
+    const enemyArea = placeArea === 'me' ? 'opp' : 'me';
+    const targetLine = s[enemyArea][lineIdx];
+    const before = targetLine.length;
+    s[enemyArea][lineIdx] = targetLine.filter(d => {
+      // 같은 영역에 있는 다른 owner의 같은 값 비실드 주사위 제거
+      if (d.val === die.val && !d.shield) return false;
+      return true;
+    });
+    removed = before - s[enemyArea][lineIdx].length;
+  }
+
+  let selfRemoved = false;
+  if (removed > 0) {
+    // 알까기 성공 → 방금 놓은 내 주사위도 함께 사라짐
+    const myArea = s[placeArea][lineIdx];
+    const idx = myArea.indexOf(die);
+    if (idx >= 0) myArea.splice(idx, 1);
+    selfRemoved = true;
+  }
+
+  return { removed, selfRemoved };
+}
+function cloneState(s) {
+  return {
+    me:  s.me.map(line => line.map(d => ({...d}))),
+    opp: s.opp.map(line => line.map(d => ({...d}))),
+  };
+}
+
+/* ---------- Line viability (라인이 아직 의미있는가) ----------
+   각 라인의 남은 슬롯 × 6 = 최대 추가 가능 점수
+   라인 격차가 그 이상이면 이미 결정난 라인 (포기 또는 안전)
+*/
+function lineViability(meAreaLine, oppAreaLine) {
+  const sc = lineScoreByOwner(meAreaLine, oppAreaLine);
+  // 남은 슬롯 = 양쪽 영역 합쳐 (3+3) - 현재 주사위 개수
+  const totalDice = meAreaLine.length + oppAreaLine.length;
+  const remainSlots = (MAX_DICE_PER_LINE * 2) - totalDice;
+  // 한 명이 남은 모든 슬롯을 가져가도 변할 수 있는 최대 점수
+  // 보수적으로: 같은 눈 6 누적 시 (val=6, n+1개) 보너스 고려해 6×(2n-1) 차이
+  // 단순화: 남은 슬롯 × 30 (6,6,6 한 라인에 만들면 30점 가능)
+  const maxSwing = remainSlots * 12;  // 평균적 변화 폭
+
+  const meDeficit = sc.opp - sc.me;
+  // me 입장에서: deficit이 maxSwing보다 크면 사실상 진 라인
+  const meDead = meDeficit > maxSwing;
+  const oppDead = -meDeficit > maxSwing;
+  // 경합 라인 가중치 (격차가 작을수록 1.0에 가까움)
+  const closeness = Math.max(0, 1 - Math.abs(meDeficit) / (maxSwing + 1));
+
+  return { sc, remainSlots, maxSwing, meDead, oppDead, closeness };
+}
+
+/* ---------- Heuristic evaluation ----------
+   2라인 승리 전략:
+   - 이미 진 라인은 가치 0 (오히려 거기 두면 손해)
+   - 경합 라인에 집중
+   - 라인 승리 가치 >> 점수 차이
+*/
+function evaluatePlacement(s, owner, placeArea, lineIdx, die) {
+  const test = cloneState(s);
+  const testDie = { ...die, owner };
+  const result = placeDie(test, owner, placeArea, lineIdx, testDie);
+  const sign = owner === 'me' ? 1 : -1;
+
+  // 각 라인을 owner 관점에서 평가
+  let lineValue = 0;
+  let lineWinDiff = 0;
+  for (let i = 0; i < 3; i++) {
+    const beforeViab = lineViability(s.me[i], s.opp[i]);
+    const afterViab = lineViability(test.me[i], test.opp[i]);
+    const beforeWin = beforeViab.sc.me - beforeViab.sc.opp;
+    const afterWin = afterViab.sc.me - afterViab.sc.opp;
+    const delta = afterWin - beforeWin;
+
+    // 죽은 라인엔 가중치 0 (포기)
+    if (afterViab.meDead || afterViab.oppDead) {
+      lineValue += delta * 0.1;  // 거의 무가치
+    } else {
+      // 경합도가 높을수록 그 라인의 점수 변화가 중요
+      lineValue += delta * (1 + afterViab.closeness * 2);
+    }
+
+    // 라인 승/패 변화
+    if (afterViab.sc.me > afterViab.sc.opp) lineWinDiff += 1;
+    else if (afterViab.sc.opp > afterViab.sc.me) lineWinDiff -= 1;
+    if (beforeViab.sc.me > beforeViab.sc.opp) lineWinDiff -= 1;
+    else if (beforeViab.sc.opp > beforeViab.sc.me) lineWinDiff += 1;
+  }
+
+  // 알까기 추가 주사위 가치
+  const extraBonus = result.removed > 0 ? 5 : 0;
+  // 2라인 승리 보너스 (라인승 2개 확보 시 큰 가산점)
+  const lw = lineWinCounts(test);
+  const has2WinsBonus = (owner === 'me' ? lw.me : lw.opp) >= 2 ? 8 : 0;
+
+  return sign * (20 * lineWinDiff + lineValue + extraBonus + has2WinsBonus);
+}
+
+function placementReasons(s, owner, placeArea, lineIdx, die) {
+  const reasons = [];
+  const isCross = owner !== placeArea;
+  const meAreaLine = s.me[lineIdx];
+  const oppAreaLine = s.opp[lineIdx];
+
+  // 알까기 판정: 실드는 공격 불가, 같은 라인 상대 영역의 같은 val 비실드만 제거
+  let removedCount = 0;
+  if (!die.shield) {
+    const enemyArea = placeArea === 'me' ? 'opp' : 'me';
+    const targetLine = s[enemyArea][lineIdx];
+    removedCount = targetLine.filter(d => d.val === die.val && !d.shield).length;
+  }
+
+  if (removedCount > 0) {
+    const enemyArea = placeArea === 'me' ? 'opp' : 'me';
+    const targetLine = s[enemyArea][lineIdx];
+    const enemyLoss = lineScoreByOwner(meAreaLine, oppAreaLine)[enemyArea]
+                    - lineScoreByOwner(
+                        enemyArea === 'me' ? targetLine.filter(d => !(d.val === die.val && !d.shield)) : meAreaLine,
+                        enemyArea === 'opp' ? targetLine.filter(d => !(d.val === die.val && !d.shield)) : oppAreaLine
+                      )[enemyArea];
+    reasons.push(`✂️ 상대 ${die.val}눈 <b>${removedCount}개</b> 알까기 (-${enemyLoss}점)`);
+    reasons.push(`💥 <b>내 주사위도 함께 사라짐</b> + 추가 주사위 1회 (실드)`);
+  } else {
+    if (die.shield) {
+      reasons.push(`🛡️ 실드: 제거 면역 + <b>알까기 공격 불가</b>`);
+    }
+    // 같은 영역의 같은 눈 개수 (점수는 영역 기준)
+    const targetAreaLine = s[placeArea][lineIdx];
+    const sameInArea = targetAreaLine.filter(d => d.val === die.val).length;
+    if (sameInArea > 0) {
+      const before = lineScoreByOwner(meAreaLine, oppAreaLine);
+      const newMe = placeArea === 'me' ? [...meAreaLine, die] : meAreaLine;
+      const newOpp = placeArea === 'opp' ? [...oppAreaLine, die] : oppAreaLine;
+      const after = lineScoreByOwner(newMe, newOpp);
+      const diff = after[placeArea] - before[placeArea];
+      const sign = isCross ? '⚠️' : '🎯';
+      const note = isCross ? ' (상대 점수↑)' : '';
+      reasons.push(`${sign} 같은 눈 ${sameInArea}개 → 영역 점수 +${diff}${note}`);
+    }
+  }
+
+  // 상대 영역에 배치 (cross) - 보너스 주사위
+  if (isCross) {
+    reasons.push(`🔄 <b>상대 영역에 배치</b> (보너스 주사위만 가능)`);
+    reasons.push(`⚠️ 이 주사위 점수는 <b>상대 점수로 계산됨</b>`);
+    const targetAreaCount = s[placeArea][lineIdx].length;
+    if (targetAreaCount === MAX_DICE_PER_LINE - 1) {
+      reasons.push(`🔒 상대 영역 슬롯 마감 → 상대 활로 차단 (강한 수)`);
+    }
+  }
+
+  // 라인 상황 (내 입장)
+  if (owner === 'me' && removedCount === 0) {
+    const viab = lineViability(meAreaLine, oppAreaLine);
+    const sc = viab.sc;
+    if (viab.meDead) {
+      reasons.push(`💀 <b>죽은 라인</b> (${sc.me} vs ${sc.opp}) — 포기하고 다른 라인에 투자`);
+    } else if (viab.oppDead) {
+      reasons.push(`🔒 <b>확정 승리 라인</b> (${sc.me} vs ${sc.opp}) — 추가 투자 비추`);
+    } else if (sc.opp > sc.me && !isCross) {
+      reasons.push(`📊 지고 있는 라인 (${sc.me} vs ${sc.opp}) — 뒤집기 기회`);
+    } else if (sc.me > sc.opp + 6 && !isCross) {
+      reasons.push(`⚠️ 이미 이기는 라인 (${sc.me} vs ${sc.opp}) — 과투자 주의`);
+    }
+    const lw = lineWinCounts(s);
+    if (lw.me === 2) {
+      reasons.push(`🏆 이미 2라인 우세 — 안전 유지 최우선`);
+    } else if (lw.me === 1 && lw.opp === 1) {
+      reasons.push(`⚖️ 1:1 박빙 — 이 라인이 승부 결정`);
+    }
+  }
+
+  // 슬롯 잠금
+  const myAreaCount = s[placeArea][lineIdx].length;
+  if (myAreaCount === MAX_DICE_PER_LINE - 1 && !isCross && removedCount === 0) {
+    reasons.push(`🔒 마지막 슬롯 — 영역 잠금`);
+  }
+
+  return reasons;
+}
+
+/* ---------- Monte Carlo simulation ---------- */
+function simulateRandom(initialState, numSims, nextTurn) {
+  let meWin = 0, tie = 0;
+  const oppLevel = parseInt(document.getElementById('oppLevel').value);
+
+  for (let sim = 0; sim < numSims; sim++) {
+    const s = cloneState(initialState);
+    // 시뮬레이션 내부에서 리롤 잔량 추적 (initialState에서 복사)
+    const rerollLeft = initialState.rerollLeft
+      ? { ...initialState.rerollLeft }
+      : { me: 1, opp: 1 };
+    let side = nextTurn;
+    let safety = 80;
+    let extraTurn = false;  // 알까기 보너스 턴
+
+    while (!isGameOver(s) && safety-- > 0) {
+      const hasSpace = s[side].some(line => line.length < MAX_DICE_PER_LINE);
+      if (!hasSpace) {
+        if (extraTurn) { extraTurn = false; continue; }
+        side = side === 'me' ? 'opp' : 'me';
+        continue;
+      }
+
+      let val = 1 + (Math.random() * 6) | 0;
+      // 보너스 주사위는 항상 실드
+      const shield = extraTurn ? true : Math.random() < 0.05;
+
+      // ⭐ 리롤 사용 정책 (시뮬레이션 NPC)
+      // - 보너스 주사위(실드)는 리롤 안 함
+      // - 주사위 자체 가치 + 현재 배치 가치를 함께 평가
+      // - 게임 후반일수록 적극적으로 사용
+      if (!extraTurn && rerollLeft[side] > 0) {
+        // 현재 진행도
+        let placedNow = 0;
+        for (let i = 0; i < 3; i++) placedNow += s.me[i].length + s.opp[i].length;
+        const progress = placedNow / 18;
+
+        // 둘 곳 평가: 현재 주사위로 둘 수 있는 최고 휴리스틱
+        const tmpDie = { val, shield, owner: side };
+        let bestEv = -Infinity;
+        for (let i = 0; i < 3; i++) {
+          if (s[side][i].length >= MAX_DICE_PER_LINE) continue;
+          const ev = evaluatePlacement(s, side, side, i, tmpDie);
+          if (ev > bestEv) bestEv = ev;
+        }
+        // bestEv가 낮을 때 (0 미만 = 나쁜 수밖에 없음) 리롤
+        // 초반엔 조심스럽게 (낮은 임계값), 후반엔 적극적으로
+        const threshold = progress < 0.3 ? -3 : progress < 0.7 ? 0 : 3;
+        const shouldReroll = bestEv < threshold;
+        // 3성 NPC는 좀 더 적극적
+        const aggressionBoost = (side === 'opp' && oppLevel === 3) ? 2 : 0;
+        if (shouldReroll || (bestEv < threshold + aggressionBoost)) {
+          rerollLeft[side]--;
+          val = 1 + (Math.random() * 6) | 0;
+        }
+      }
+
+      const die = { val, shield, owner: side };
+
+      // Pick line (시뮬레이션에서는 자기 영역만 — 상대 영역 배치는 휴리스틱 복잡도 줄이기)
+      let chosen;
+      if (side === 'opp' && oppLevel === 1) {
+        const avail = [0,1,2].filter(i => s[side][i].length < MAX_DICE_PER_LINE);
+        chosen = avail[(Math.random() * avail.length) | 0];
+      } else {
+        let bestScore = -Infinity, bestLines = [];
+        for (let i = 0; i < 3; i++) {
+          if (s[side][i].length >= MAX_DICE_PER_LINE) continue;
+          const ev = evaluatePlacement(s, side, side, i, die);
+          if (ev > bestScore) { bestScore = ev; bestLines = [i]; }
+          else if (ev === bestScore) bestLines.push(i);
+        }
+        chosen = bestLines[(Math.random() * bestLines.length) | 0];
+      }
+      const result = placeDie(s, side, side, chosen, die);
+
+      // 알까기 성공 → 같은 플레이어 추가 턴 (실드 주사위)
+      if (result.removed > 0) {
+        extraTurn = true;
+      } else {
+        extraTurn = false;
+        side = side === 'me' ? 'opp' : 'me';
+      }
+    }
+    const w = gameWinner(s);
+    if (w === 'me') meWin++;
+    else if (w === 'tie') tie++;
+  }
+  return (meWin + 0.5 * tie) / numSims;
+}
+
+function evaluateAllMyMoves() {
+  if (state.currentDie === null || state.inputMode !== 'me') return null;
+  const die = { val: state.currentDie, shield: state.currentShield, owner: 'me' };
+  const numSims = parseInt(document.getElementById('simCount').value);
+  const moves = [];
+
+  // 내 영역에 배치
+  for (let i = 0; i < 3; i++) {
+    if (state.me[i].length >= MAX_DICE_PER_LINE) continue;
+    const post = cloneState(state);
+    const result = placeDie(post, 'me', 'me', i, { ...die });
+    const heuristic = evaluatePlacement(state, 'me', 'me', i, die);
+    const nextTurn = result.removed > 0 ? 'me' : 'opp';
+    const winrate = simulateRandom(post, numSims, nextTurn);
+    const reasons = placementReasons(state, 'me', 'me', i, die);
+    moves.push({ line: i, target: 'own', placeArea: 'me', heuristic, winrate, reasons });
+  }
+
+  // 상대 영역에 배치 (보너스 주사위 상황)
+  if (state.pendingExtra) {
+    for (let i = 0; i < 3; i++) {
+      if (state.opp[i].length >= MAX_DICE_PER_LINE) continue;
+      const post = cloneState(state);
+      const result = placeDie(post, 'me', 'opp', i, { ...die });
+      const heuristic = evaluatePlacement(state, 'me', 'opp', i, die);
+      const nextTurn = result.removed > 0 ? 'me' : 'opp';
+      const winrate = simulateRandom(post, numSims, nextTurn);
+      const reasons = placementReasons(state, 'me', 'opp', i, die);
+      moves.push({ line: i, target: 'cross', placeArea: 'opp', heuristic, winrate, reasons });
+    }
+  }
+
+  // 리롤 옵션 평가 (남은 리롤이 있을 때만)
+  // ⭐ 리롤은 1회 한정 카드 — "지금 안 쓰면 나중에 더 좋게 쓸 수 있다"는 option value 고려
+  if (state.rerollLeft.me > 0 && !state.pendingExtra && moves.length > 0) {
+    // 현재 배치 가능한 최선 수의 승률 (정렬 전이므로 max 직접 계산)
+    const bestPlaceWR = Math.max(...moves.map(m => m.winrate));
+
+    // 리롤 raw 기대값: 각 면(1~6) × 1/6 × 그 면의 최고 배치 승률
+    // 단, 리롤은 실드를 잃음 → 현재 주사위가 실드면 그 가치도 감산
+    const rerollSims = Math.max(30, Math.floor(numSims / 6));
+    let rawEV = 0;
+    for (let v = 1; v <= 6; v++) {
+      const newDie = { val: v, shield: false, owner: 'me' };
+      let bestForV = -Infinity;
+      for (let i = 0; i < 3; i++) {
+        if (state.me[i].length >= MAX_DICE_PER_LINE) continue;
+        const post = cloneState(state);
+        const result = placeDie(post, 'me', 'me', i, { ...newDie });
+        const nextTurn = result.removed > 0 ? 'me' : 'opp';
+        const wr = simulateRandom(post, rerollSims, nextTurn);
+        if (wr > bestForV) bestForV = wr;
+      }
+      rawEV += bestForV / 6;
+    }
+
+    // ⭐ Option value 보정: 게임 후반일수록 리롤 보존 가치↓, 초반일수록 보존 가치↑
+    // 게임 진행도 = 놓인 주사위 수 / 총 슬롯 (18)
+    let placedCount = 0;
+    for (let i = 0; i < 3; i++) {
+      placedCount += state.me[i].length + state.opp[i].length;
+    }
+    const gameProgress = placedCount / 18;
+    // option value penalty: 초반 8%, 중반 4%, 후반 0%
+    const optionValuePenalty = (1 - gameProgress) * 0.08;
+    const adjustedEV = rawEV - optionValuePenalty;
+
+    // 실드 가치 보정: 현재 주사위가 실드면 리롤 시 실드 잃음 → 추가 페널티 3%
+    const shieldLossPenalty = die.shield ? 0.03 : 0;
+    const finalEV = adjustedEV - shieldLossPenalty;
+
+    // 리롤 추천 임계값: 배치 최선보다 최소 5%p 더 좋아야 추천
+    const REROLL_THRESHOLD = 0.05;
+    const advantage = finalEV - bestPlaceWR;
+    const shouldRecommend = advantage >= REROLL_THRESHOLD;
+
+    const reasons = [
+      `🎲 <b>리롤 옵션</b> (${state.rerollLeft.me}회 남음)`,
+      `📊 리롤 raw 기대: ${Math.round(rawEV * 100)}% / 현재 최선: ${Math.round(bestPlaceWR * 100)}%`,
+      `⏳ 게임 진행도: ${Math.round(gameProgress * 100)}% — 보존 페널티 -${Math.round(optionValuePenalty * 100)}%p`,
+      die.shield ? `🛡️ 실드 손실 페널티 -${Math.round(shieldLossPenalty * 100)}%p` : `현재 주사위는 실드 없음`,
+      shouldRecommend
+        ? `✅ <b>리롤 권장</b> (배치보다 +${Math.round(advantage * 100)}%p 이득)`
+        : `⚠️ 리롤 보존 권장 (이득 ${Math.round(advantage * 100)}%p < 임계값 5%p)`,
+    ];
+    moves.push({
+      line: -1, target: 'reroll', placeArea: null,
+      heuristic: 0,
+      // 추천 정렬에 쓰는 winrate는 임계값 미달 시 페널티 부여 → 후순위로
+      winrate: shouldRecommend ? finalEV : Math.min(finalEV, bestPlaceWR - 0.01),
+      reasons,
+    });
+  }
+
+  moves.sort((a, b) => b.winrate - a.winrate);
+  return moves;
+}
+
+/* =========================================================
+   RENDER
+   ========================================================= */
+
+function pipPositions(val) {
+  // 3x3 grid positions for dice pips
+  const pos = {
+    1: [4],
+    2: [0, 8],
+    3: [0, 4, 8],
+    4: [0, 2, 6, 8],
+    5: [0, 2, 4, 6, 8],
+    6: [0, 2, 3, 5, 6, 8],
+  };
+  return pos[val] || [];
+}
+
+function makeDiceEl(die, opts = {}) {
+  const el = document.createElement('div');
+  const ownerCls = die.owner === 'me' ? 'owner-me' : 'owner-opp';
+  const isMisplaced = opts.area && opts.area !== die.owner;
+  el.className = 'dice face ' + ownerCls
+                 + (die.shield ? ' shield' : '')
+                 + (opts.recent ? ' recent' : '')
+                 + (isMisplaced ? ' misplaced' : '');
+  el.title = `${die.owner === 'me' ? '내' : '상대'} ${die.val}${die.shield ? ' 🛡실드' : ''}${isMisplaced ? ' (상대 영역에 배치됨)' : ''}`;
+  const positions = pipPositions(die.val);
+  for (let i = 0; i < 9; i++) {
+    const cell = document.createElement('div');
+    if (positions.includes(i)) cell.className = 'pip';
+    el.appendChild(cell);
+  }
+  if (opts.removable) {
+    const rm = document.createElement('div');
+    rm.className = 'remove-btn';
+    rm.textContent = '×';
+    rm.title = '제거';
+    rm.onclick = opts.onRemove;
+    el.appendChild(rm);
+  }
+  return el;
+}
+
+function makeSimpleDiceEl(val, shield, owner = 'me') {
+  // For tray display - bigger
+  const el = document.createElement('div');
+  const ownerCls = owner === 'me' ? 'owner-me' : 'owner-opp';
+  el.className = 'dice face ' + ownerCls + (shield ? ' shield' : '');
+  el.style.width = '60px';
+  el.style.height = '60px';
+  const positions = pipPositions(val);
+  for (let i = 0; i < 9; i++) {
+    const cell = document.createElement('div');
+    if (positions.includes(i)) cell.className = 'pip';
+    el.appendChild(cell);
+  }
+  return el;
+}
+
+function renderLine(area, lineIdx) {
+  const lineEl = document.querySelector(`.line[data-side="${area}"][data-line="${lineIdx}"]`);
+  lineEl.innerHTML = '';
+  const dice = state[area][lineIdx];
+  for (let i = 0; i < dice.length; i++) {
+    const d = dice[i];
+    const isRecent = state.lastPlaced &&
+                     state.lastPlaced.area === area &&
+                     state.lastPlaced.line === lineIdx &&
+                     state.lastPlaced.idx === i;
+    const el = makeDiceEl(d, {
+      area,
+      recent: isRecent,
+      removable: true,
+      onRemove: (e) => {
+        e.stopPropagation();
+        pushHistory();
+        state[area][lineIdx].splice(i, 1);
+        state.lastPlaced = null;
+        addLog(`${area === 'me' ? '내 영역' : '상대 영역'} 라인${lineIdx+1}의 ${d.val}(${d.owner === 'me' ? '내' : '상대'}) 제거`);
+        render();
+      },
+    });
+    lineEl.appendChild(el);
+  }
+  // Ghost slots
+  for (let i = dice.length; i < MAX_DICE_PER_LINE; i++) {
+    const g = document.createElement('div');
+    g.className = 'slot-ghost';
+    lineEl.appendChild(g);
+  }
+  lineEl.classList.toggle('full', dice.length >= MAX_DICE_PER_LINE);
+}
+
+function renderScores() {
+  for (let i = 0; i < 3; i++) {
+    const sc = lineScoreByOwner(state.me[i], state.opp[i]);
+    const m = sc.me;
+    const o = sc.opp;
+    const row = document.querySelector(`.score-row[data-row="${i}"]`);
+    const meEl = row.querySelector('.me-score');
+    const oppEl = row.querySelector('.opp-score');
+    const arrow = row.querySelector('.arrow');
+    meEl.textContent = m;
+    oppEl.textContent = o;
+    meEl.classList.toggle('winning', m > o);
+    oppEl.classList.toggle('winning', o > m);
+    if (m > o) {
+      arrow.textContent = '◁';
+      arrow.className = 'arrow me';
+    } else if (o > m) {
+      arrow.textContent = '▷';
+      arrow.className = 'arrow opp';
+    } else {
+      arrow.textContent = '—';
+      arrow.className = 'arrow';
+    }
+  }
+  const lw = lineWinCounts();
+  const ts = totalScores();
+  document.getElementById('lineWins').textContent = `${lw.me} : ${lw.opp}`;
+  document.getElementById('totalScore').textContent = `${ts.me} : ${ts.opp}`;
+  let mSlots = 0, oSlots = 0;
+  for (let i = 0; i < 3; i++) {
+    mSlots += MAX_DICE_PER_LINE - state.me[i].length;
+    oSlots += MAX_DICE_PER_LINE - state.opp[i].length;
+  }
+  document.getElementById('slotsLeft').textContent = `${mSlots} : ${oSlots}`;
+  document.getElementById('turnNum').textContent = state.turnNum;
+  document.getElementById('rerollLeftMe').textContent = state.rerollLeft.me;
+  document.getElementById('rerollLeftOpp').textContent = state.rerollLeft.opp;
+  // 리롤 버튼 활성화 상태 (잔량 + 현재 모드에 따라 강조)
+  const meBtn = document.getElementById('rerollBtn');
+  const oppBtn = document.getElementById('oppRerollBtn');
+  // 내 리롤 버튼
+  if (state.rerollLeft.me <= 0) {
+    meBtn.style.opacity = '0.3';
+    meBtn.style.cursor = 'not-allowed';
+    meBtn.disabled = true;
+  } else {
+    meBtn.style.opacity = state.inputMode === 'me' ? '1' : '0.6';
+    meBtn.style.cursor = 'pointer';
+    meBtn.disabled = false;
+  }
+  // 상대 리롤 버튼
+  if (state.rerollLeft.opp <= 0) {
+    oppBtn.style.opacity = '0.3';
+    oppBtn.style.cursor = 'not-allowed';
+    oppBtn.disabled = true;
+  } else {
+    oppBtn.style.opacity = state.inputMode === 'opp' ? '1' : '0.6';
+    oppBtn.style.cursor = 'pointer';
+    oppBtn.disabled = false;
+  }
+}
+
+function renderTray() {
+  const myTray = document.getElementById('myTrayDie');
+  const oppTray = document.getElementById('oppTrayDie');
+  myTray.innerHTML = '';
+  oppTray.innerHTML = '';
+
+  if (state.inputMode === 'me' && state.currentDie !== null) {
+    myTray.className = 'dice face owner-me';
+    myTray.style.width = '60px'; myTray.style.height = '60px';
+    const positions = pipPositions(state.currentDie);
+    for (let i = 0; i < 9; i++) {
+      const cell = document.createElement('div');
+      if (positions.includes(i)) cell.className = 'pip';
+      myTray.appendChild(cell);
+    }
+    if (state.currentShield) myTray.classList.add('shield');
+  } else {
+    myTray.className = 'dice empty';
+    myTray.textContent = '?';
+  }
+
+  if (state.inputMode === 'opp' && state.currentDie !== null) {
+    oppTray.className = 'dice face owner-opp';
+    oppTray.style.width = '60px'; oppTray.style.height = '60px';
+    const positions = pipPositions(state.currentDie);
+    for (let i = 0; i < 9; i++) {
+      const cell = document.createElement('div');
+      if (positions.includes(i)) cell.className = 'pip';
+      oppTray.appendChild(cell);
+    }
+    if (state.currentShield) oppTray.classList.add('shield');
+  } else {
+    oppTray.className = 'dice empty';
+    oppTray.textContent = '?';
+  }
+}
+
+function renderTurnTag() {
+  const meTag = document.getElementById('turnTagMe');
+  const oppTag = document.getElementById('turnTagOpp');
+  meTag.classList.toggle('hidden', state.inputMode !== 'me');
+  oppTag.classList.toggle('hidden', state.inputMode !== 'opp');
+  const badge = document.getElementById('modeBadge');
+  if (state.pendingExtra) {
+    badge.textContent = `⚡ ${state.inputMode === 'me' ? '내' : '상대'} 보너스 턴`;
+    badge.style.background = 'rgba(244,208,137,0.4)';
+    badge.style.color = '#2a1a10';
+  } else {
+    badge.textContent = state.inputMode === 'me' ? '내 차례' : '상대 차례';
+    badge.style.background = '';
+    badge.style.color = '';
+  }
+}
+
+function renderRecommend() {
+  const action = document.getElementById('recAction');
+  const reasons = document.getElementById('recReasons');
+  const fill = document.getElementById('winrateFill');
+  const wrText = document.getElementById('winrateText');
+
+  document.querySelectorAll('.line').forEach(el => el.classList.remove('recommended'));
+
+  if (state.inputMode !== 'me' || state.currentDie === null) {
+    action.textContent = state.inputMode === 'opp'
+      ? '상대 입력 모드 — 상대 주사위를 선택 후 상대 라인 클릭'
+      : '주사위 눈을 선택하세요';
+    reasons.innerHTML = state.pendingExtra
+      ? '⚡ <b>알까기 보너스 추가 주사위!</b><br>자기 라인 또는 상대 라인에 배치 가능 (실드 자동)'
+      : '— 알고리즘이 모든 배치 위치를 평가하여<br>실시간으로 최적 수를 추천합니다.';
+    fill.style.width = '0%';
+    wrText.textContent = '—';
+    return;
+  }
+
+  const moves = evaluateAllMyMoves();
+  if (!moves || moves.length === 0) {
+    action.textContent = '배치 가능한 라인이 없습니다';
+    reasons.innerHTML = '모든 라인이 가득 찼습니다.';
+    fill.style.width = '0%';
+    wrText.textContent = '—';
+    return;
+  }
+
+  const best = moves[0];
+
+  if (best.target === 'reroll') {
+    action.innerHTML = `<span style="color:#fff;">🎲 <span style="font-size:24px;color:var(--gold-bright);">리롤 권장</span></span>`;
+  } else {
+    const targetLabel = best.target === 'cross' ? '⚡상대' : '내';
+    action.innerHTML = `<span style="color:#fff;">${targetLabel} 라인 <span style="font-size:28px;color:var(--gold-bright);">${best.line + 1}</span> 에 배치</span>`;
+  }
+
+  // 리롤이 best가 아니지만 옵션에 있으면 부가 안내
+  const rerollMove = moves.find(m => m.target === 'reroll');
+  let extraInfo = '';
+  if (rerollMove && best.target !== 'reroll') {
+    const diff = Math.round((rerollMove.winrate - best.winrate) * 100);
+    extraInfo = `<div style="margin-top:6px; padding:6px; background:rgba(0,0,0,0.3); border-radius:4px; font-size:11px; color:var(--muted);">
+      🎲 리롤 시 기대 승률: ${Math.round(rerollMove.winrate * 100)}% (${diff >= 0 ? '+' : ''}${diff}%p) — 보존 권장
+    </div>`;
+  }
+
+  reasons.innerHTML = (best.reasons.length
+    ? best.reasons.map(r => `<div>• ${r}</div>`).join('')
+    : '— 명확한 우선 효과는 없으나 가장 안정적인 위치입니다.') + extraInfo;
+  const pct = Math.round(best.winrate * 100);
+  fill.style.width = pct + '%';
+  wrText.textContent = pct + '%';
+
+  // Highlight recommended line on board (리롤이면 리롤 버튼 강조)
+  const meBtn = document.getElementById('rerollBtn');
+  const oppBtn = document.getElementById('oppRerollBtn');
+  meBtn.style.boxShadow = '';
+  meBtn.style.background = '';
+  meBtn.style.color = '';
+  oppBtn.style.boxShadow = '';
+  oppBtn.style.background = '';
+  oppBtn.style.color = '';
+  if (best.target === 'reroll') {
+    meBtn.style.boxShadow = '0 0 15px var(--gold-bright)';
+    meBtn.style.background = 'linear-gradient(135deg, var(--gold-bright), var(--gold))';
+    meBtn.style.color = '#2a1a10';
+  } else {
+    const recSide = best.target === 'cross' ? 'opp' : 'me';
+    const recEl = document.querySelector(`.line.${recSide}[data-line="${best.line}"]`);
+    if (recEl) recEl.classList.add('recommended');
+  }
+}
+
+function render() {
+  for (let i = 0; i < 3; i++) {
+    renderLine('me', i);
+    renderLine('opp', i);
+  }
+  renderScores();
+  renderTray();
+  renderTurnTag();
+  setTimeout(renderRecommend, 0);
+
+  if (isGameOver()) {
+    showGameOver();
+  }
+}
+
+function showGameOver() {
+  const winner = gameWinner();
+  const overlay = document.getElementById('gameOverOverlay');
+  const result = document.getElementById('gameOverResult');
+  const detail = document.getElementById('gameOverDetail');
+  const lw = lineWinCounts();
+  const ts = totalScores();
+  if (winner === 'me') {
+    result.textContent = '🎉 승리!';
+    result.style.color = 'var(--good)';
+  } else if (winner === 'opp') {
+    result.textContent = '😢 패배';
+    result.style.color = 'var(--bad)';
+  } else {
+    result.textContent = '🤝 무승부';
+    result.style.color = 'var(--gold-bright)';
+  }
+  detail.innerHTML = `라인 승: ${lw.me} : ${lw.opp} · 총점: ${ts.me} : ${ts.opp}`;
+  overlay.classList.add('show');
+}
+
+/* =========================================================
+   ACTIONS
+   ========================================================= */
+
+function pushHistory() {
+  state.history.push({
+    me: state.me.map(l => l.map(d => ({...d}))),
+    opp: state.opp.map(l => l.map(d => ({...d}))),
+    currentDie: state.currentDie,
+    currentShield: state.currentShield,
+    inputMode: state.inputMode,
+    turnNum: state.turnNum,
+    lastPlaced: state.lastPlaced ? {...state.lastPlaced} : null,
+    pendingExtra: state.pendingExtra,
+    firstMoveDone: state.firstMoveDone,
+    rerollLeft: { ...state.rerollLeft },
+  });
+  if (state.history.length > 50) state.history.shift();
+}
+
+function addLog(msg) {
+  const el = document.getElementById('log');
+  const div = document.createElement('div');
+  const t = new Date().toLocaleTimeString();
+  div.textContent = `[${t}] ${msg}`;
+  el.insertBefore(div, el.firstChild);
+}
+
+function placeAtLine(clickedArea, lineIdx) {
+  if (state.currentDie === null) {
+    addLog('먼저 주사위 눈을 선택하세요');
+    return;
+  }
+  // clickedArea: 'me' | 'opp' (어느 영역의 라인을 클릭했는지)
+  // state.inputMode: 누가 두는 주사위인지 (owner)
+  const owner = state.inputMode;
+  const isCross = clickedArea !== owner;  // 자기 영역이 아닌 곳에 배치하는가
+
+  if (state[clickedArea][lineIdx].length >= MAX_DICE_PER_LINE) {
+    addLog(`라인 ${lineIdx+1}이 가득 찼습니다`);
+    return;
+  }
+  if (isCross && !state.pendingExtra) {
+    if (!confirm('상대 영역에 배치하시겠습니까? (보통 알까기 보너스 주사위에서만 가능합니다)')) return;
+  }
+
+  pushHistory();
+  const die = { val: state.currentDie, shield: state.currentShield, owner };
+  const result = placeDie(state, owner, clickedArea, lineIdx, die);
+  state.lastPlaced = { area: clickedArea, line: lineIdx, idx: state[clickedArea][lineIdx].length - 1 };
+  state.turnNum++;
+
+  let msg = `${owner === 'me' ? '🟢 나' : '🔴 상대'}: ${isCross ? '⚡상대 영역' : '본인 영역'} 라인 ${lineIdx+1}에 ${die.val}${die.shield?'🛡️':''} 배치`;
+  if (result.removed > 0) {
+    msg += ` → 💥알까기 ${result.removed}개! (내 주사위도 사라짐)`;
+  }
+  addLog(msg);
+
+  // 선택 초기화
+  state.currentDie = null;
+  state.currentShield = false;
+  document.getElementById('shieldCheck').checked = false;
+  document.querySelectorAll('#picker button').forEach(b => b.classList.remove('active'));
+
+  // ⭐ 알까기 성공 시 같은 플레이어 추가 턴 (보너스 주사위는 실드)
+  if (result.removed > 0) {
+    state.pendingExtra = true;
+    state.inputMode = owner;  // 같은 플레이어 유지
+    addLog(`✨ ${owner === 'me' ? '내' : '상대'} 추가 주사위 1회! (실드 자동)`);
+    state.currentShield = true;
+    document.getElementById('shieldCheck').checked = true;
+  } else {
+    state.pendingExtra = false;
+    state.inputMode = owner === 'me' ? 'opp' : 'me';
+    if (!state.firstMoveDone) {
+      state.firstMoveDone = true;
+    }
+  }
+
+  document.querySelectorAll('#inputMode button').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === state.inputMode));
+
+  render();
+}
+
+/* =========================================================
+   EVENT BINDINGS
+   ========================================================= */
+
+document.querySelectorAll('#picker button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#picker button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.currentDie = parseInt(btn.dataset.val);
+    render();
+  });
+});
+
+document.getElementById('shieldCheck').addEventListener('change', e => {
+  state.currentShield = e.target.checked;
+  render();
+});
+
+document.querySelectorAll('#inputMode button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#inputMode button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.inputMode = btn.dataset.mode;
+    render();
+  });
+});
+
+document.querySelectorAll('.line').forEach(line => {
+  line.addEventListener('click', () => {
+    const side = line.dataset.side;
+    const idx = parseInt(line.dataset.line);
+    placeAtLine(side, idx);
+  });
+});
+
+document.querySelectorAll('.setup-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.setup-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+document.getElementById('newGameBtn').addEventListener('click', () => {
+  const firstMover = document.querySelector('.setup-btn.active')?.dataset.firstmover || 'me';
+  const meReroll = document.getElementById('meHasReroll').checked ? 1 : 0;
+  const oppReroll = document.getElementById('oppHasReroll').checked ? 1 : 0;
+  startNewGame(firstMover, meReroll, oppReroll);
+});
+
+function startNewGame(firstMover = 'me', meReroll = 1, oppReroll = 1) {
+  state = {
+    me:  [[], [], []],
+    opp: [[], [], []],
+    currentDie: null,
+    currentShield: true,           // ⭐ 선공 첫 주사위 = 실드
+    inputMode: firstMover,
+    placeTarget: 'own',
+    turnNum: 1,
+    history: [],
+    lastPlaced: null,
+    pendingExtra: false,
+    firstMoveDone: false,
+    rerollLeft: { me: meReroll, opp: oppReroll },
+  };
+  document.getElementById('shieldCheck').checked = true;
+  document.querySelectorAll('#picker button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#inputMode button').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === firstMover));
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('gameOverOverlay').classList.remove('show');
+  const rerollMsg = `리롤 ${meReroll ? '🟢' : '⛔'}나 / ${oppReroll ? '🔴' : '⛔'}상대`;
+  addLog(`🆕 새 게임 — ${firstMover === 'me' ? '🟢내가 선공' : '🔴상대 선공'} (첫 주사위 = 실드 🛡️) · ${rerollMsg}`);
+  render();
+}
+
+document.getElementById('undoBtn').addEventListener('click', () => {
+  if (!state.history.length) { addLog('되돌릴 수 없습니다'); return; }
+  const prev = state.history.pop();
+  state.me = prev.me;
+  state.opp = prev.opp;
+  state.currentDie = prev.currentDie;
+  state.currentShield = prev.currentShield;
+  state.inputMode = prev.inputMode;
+  state.turnNum = prev.turnNum;
+  state.lastPlaced = prev.lastPlaced;
+  state.pendingExtra = prev.pendingExtra;
+  state.firstMoveDone = prev.firstMoveDone;
+  state.rerollLeft = prev.rerollLeft || { me: 1, opp: 1 };
+  document.getElementById('shieldCheck').checked = state.currentShield;
+  document.querySelectorAll('#picker button').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.val) === state.currentDie));
+  document.querySelectorAll('#inputMode button').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === state.inputMode));
+  addLog('↶ 한 수 무르기');
+  render();
+});
+
+document.getElementById('simCount').addEventListener('input', e => {
+  document.getElementById('simCountLabel').textContent = e.target.value;
+});
+document.getElementById('simCount').addEventListener('change', () => render());
+document.getElementById('oppLevel').addEventListener('change', () => render());
+
+function useReroll(who) {
+  if (state.rerollLeft[who] <= 0) {
+    addLog(`${who === 'me' ? '내' : '상대'} 리롤 기회가 없습니다`);
+    return;
+  }
+  // 입력 모드가 다르면 자동 전환
+  if (state.inputMode !== who) {
+    state.inputMode = who;
+    document.querySelectorAll('#inputMode button').forEach(b =>
+      b.classList.toggle('active', b.dataset.mode === who));
+  }
+  pushHistory();
+  state.rerollLeft[who]--;
+  state.currentDie = null;
+  state.currentShield = false;
+  document.querySelectorAll('#picker button').forEach(b => b.classList.remove('active'));
+  document.getElementById('shieldCheck').checked = false;
+  addLog(`🎲 ${who === 'me' ? '🟢 내' : '🔴 상대'} 리롤 사용 (${state.rerollLeft[who]}회 남음) — 새 눈을 선택하세요`);
+  render();
+}
+
+document.getElementById('rerollBtn').addEventListener('click', () => useReroll('me'));
+document.getElementById('oppRerollBtn').addEventListener('click', () => useReroll('opp'));
+
+// Keyboard shortcuts: 1-6 for dice, S for shield, M for mode toggle
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key >= '1' && e.key <= '6') {
+    const btn = document.querySelector(`#picker button[data-val="${e.key}"]`);
+    if (btn) btn.click();
+  } else if (e.key.toLowerCase() === 's') {
+    const cb = document.getElementById('shieldCheck');
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change'));
+  } else if (e.key.toLowerCase() === 'm') {
+    const next = state.inputMode === 'me' ? 'opp' : 'me';
+    document.querySelector(`#inputMode button[data-mode="${next}"]`).click();
+  } else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+    document.getElementById('undoBtn').click();
+  }
+});
+
+// 초기 게임 시작 (선공 = 나, 첫 주사위 실드 자동)
+startNewGame('me');
+addLog('단축키: 1~6(눈), S(실드), M(모드 전환), Ctrl+Z(무르기)');
+</script>
+</body>
+</html>
