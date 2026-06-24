@@ -823,8 +823,8 @@
     <div class="panel">
       <h2>⚙️ 설정</h2>
       <div class="setting">
-        <label>몬테카를로 시뮬레이션: <span id="simCountLabel">300</span>회</label>
-        <input type="range" id="simCount" min="50" max="1500" value="300" step="50" />
+        <label>몬테카를로 시뮬레이션: <span id="simCountLabel">800</span>회</label>
+        <input type="range" id="simCount" min="100" max="2500" value="800" step="100" />
       </div>
       <div class="setting">
         <label>상대 NPC 난이도</label>
@@ -1006,73 +1006,177 @@ function cloneState(s) {
 }
 
 /* ---------- Line viability (라인이 아직 의미있는가) ----------
-   각 라인의 남은 슬롯 × 6 = 최대 추가 가능 점수
-   라인 격차가 그 이상이면 이미 결정난 라인 (포기 또는 안전)
+   ⭐ 핵심: 각 영역(me/opp)의 남은 슬롯을 분리해 계산
+   - 내 영역 슬롯은 내 점수에만 기여 가능
+   - 한 영역에 같은 눈 1개 더 = 최대 +val × 5 (1→3개 누적시) 가능
+   - 보수적 평균: 슬롯당 ≈ 10점 (val 3.5 평균 × ~3 배수)
 */
 function lineViability(meAreaLine, oppAreaLine) {
   const sc = lineScoreByOwner(meAreaLine, oppAreaLine);
-  // 남은 슬롯 = 양쪽 영역 합쳐 (3+3) - 현재 주사위 개수
-  const totalDice = meAreaLine.length + oppAreaLine.length;
-  const remainSlots = (MAX_DICE_PER_LINE * 2) - totalDice;
-  // 한 명이 남은 모든 슬롯을 가져가도 변할 수 있는 최대 점수
-  // 보수적으로: 같은 눈 6 누적 시 (val=6, n+1개) 보너스 고려해 6×(2n-1) 차이
-  // 단순화: 남은 슬롯 × 30 (6,6,6 한 라인에 만들면 30점 가능)
-  const maxSwing = remainSlots * 12;  // 평균적 변화 폭
+  const meRemain = MAX_DICE_PER_LINE - meAreaLine.length;
+  const oppRemain = MAX_DICE_PER_LINE - oppAreaLine.length;
 
+  // 각 영역 최대 추가 점수 (낙관적 상한: 6×(2n+1) - 6×(2n-1) 형태)
+  // 1개 남은 영역에 같은 눈 추가: 기존 1→2개면 +6×3 - 6×1 = +12 (val=6)
+  // 보수적이지만 6,6 만들기 가능성 고려: 슬롯당 ~12점
+  const maxMeGain = meRemain * 12;
+  const maxOppGain = oppRemain * 12;
+
+  // me 입장 격차
   const meDeficit = sc.opp - sc.me;
-  // me 입장에서: deficit이 maxSwing보다 크면 사실상 진 라인
-  const meDead = meDeficit > maxSwing;
-  const oppDead = -meDeficit > maxSwing;
-  // 경합 라인 가중치 (격차가 작을수록 1.0에 가까움)
-  const closeness = Math.max(0, 1 - Math.abs(meDeficit) / (maxSwing + 1));
+  // 진짜 죽은 라인: 내가 남은 슬롯 다 써도 못 따라잡음 + 상대가 더 늘릴 여지도 있음
+  const meDead = meDeficit > maxMeGain && meDeficit > 0;
+  const oppDead = -meDeficit > maxOppGain && meDeficit < 0;
 
-  return { sc, remainSlots, maxSwing, meDead, oppDead, closeness };
+  // 경합도: 격차 + 양쪽 변동폭으로 정규화
+  const totalSwing = maxMeGain + maxOppGain + 1;
+  const closeness = Math.max(0, 1 - Math.abs(meDeficit) / totalSwing);
+
+  return { sc, meRemain, oppRemain, maxMeGain, maxOppGain, meDead, oppDead, closeness };
 }
 
 /* ---------- Heuristic evaluation ----------
-   2라인 승리 전략:
-   - 이미 진 라인은 가치 0 (오히려 거기 두면 손해)
-   - 경합 라인에 집중
-   - 라인 승리 가치 >> 점수 차이
+   2라인 승리 = 절대 목표 (총점은 타이브레이커)
+   가중치 우선순위:
+     1. 2라인 우세 확보/유지 (압도적 1순위)
+     2. 죽은 라인 회피 (점수 낭비 방지)
+     3. 알까기 (점수 + 보너스 주사위)
+     4. 경합 라인 점수 차이
+     5. 알까기 위협 회피 (다음 턴 손실 기대값)
 */
+function lineWonBy(sc) {
+  if (sc.me > sc.opp) return 'me';
+  if (sc.opp > sc.me) return 'opp';
+  return 'tie';
+}
+
+// 다음 턴 상대가 이 라인의 내 주사위를 알까기할 위험 점수
+// = Σ (같은 값 비실드 주사위) × val × (1/6 확률) × 2 (점수 + 보너스 가치)
+function knockoffThreat(s, side, lineIdx) {
+  const area = s[side][lineIdx];
+  let threat = 0;
+  // val별로 같은 값 그룹의 점수 손실 계산
+  const byVal = {};
+  for (const d of area) {
+    if (d.shield) continue;  // 실드는 알까기 못당함
+    byVal[d.val] = (byVal[d.val] || 0) + 1;
+  }
+  for (const val in byVal) {
+    const n = byVal[val];
+    const valNum = parseInt(val);
+    // n개 → 0개 손실 = val × (2n-1) 점수 손실 (영역 점수 기준)
+    const scoreLoss = valNum * (2 * n - 1);
+    // 상대가 그 값 굴릴 확률 ≈ 1/6, 알까기 후 보너스도 받음
+    threat += (1 / 6) * (scoreLoss + 6);  // +6은 보너스 주사위 가치
+  }
+  return threat;
+}
+
 function evaluatePlacement(s, owner, placeArea, lineIdx, die) {
   const test = cloneState(s);
   const testDie = { ...die, owner };
   const result = placeDie(test, owner, placeArea, lineIdx, testDie);
   const sign = owner === 'me' ? 1 : -1;
 
-  // 각 라인을 owner 관점에서 평가
+  // --- 라인별 평가 ---
   let lineValue = 0;
-  let lineWinDiff = 0;
+  let myLineWins = 0, oppLineWins = 0;
+  let myLineWinsBefore = 0, oppLineWinsBefore = 0;
+
   for (let i = 0; i < 3; i++) {
     const beforeViab = lineViability(s.me[i], s.opp[i]);
     const afterViab = lineViability(test.me[i], test.opp[i]);
-    const beforeWin = beforeViab.sc.me - beforeViab.sc.opp;
-    const afterWin = afterViab.sc.me - afterViab.sc.opp;
-    const delta = afterWin - beforeWin;
+    const beforeOwner = lineWonBy(beforeViab.sc);
+    const afterOwner = lineWonBy(afterViab.sc);
 
-    // 죽은 라인엔 가중치 0 (포기)
+    if (beforeOwner === 'me') myLineWinsBefore++;
+    else if (beforeOwner === 'opp') oppLineWinsBefore++;
+    if (afterOwner === 'me') myLineWins++;
+    else if (afterOwner === 'opp') oppLineWins++;
+
+    // 점수 변화 (me 입장)
+    const beforeDiff = beforeViab.sc.me - beforeViab.sc.opp;
+    const afterDiff = afterViab.sc.me - afterViab.sc.opp;
+    const delta = afterDiff - beforeDiff;
+
+    // 라인 가치 가중치
+    let weight;
     if (afterViab.meDead || afterViab.oppDead) {
-      lineValue += delta * 0.1;  // 거의 무가치
+      weight = 0.05;  // 죽은 라인 거의 무시
     } else {
-      // 경합도가 높을수록 그 라인의 점수 변화가 중요
-      lineValue += delta * (1 + afterViab.closeness * 2);
+      // 경합도(0~1)에 비례, 최소 0.5
+      weight = 0.5 + afterViab.closeness * 2.5;
     }
-
-    // 라인 승/패 변화
-    if (afterViab.sc.me > afterViab.sc.opp) lineWinDiff += 1;
-    else if (afterViab.sc.opp > afterViab.sc.me) lineWinDiff -= 1;
-    if (beforeViab.sc.me > beforeViab.sc.opp) lineWinDiff -= 1;
-    else if (beforeViab.sc.opp > beforeViab.sc.me) lineWinDiff += 1;
+    lineValue += delta * weight;
   }
 
-  // 알까기 추가 주사위 가치
-  const extraBonus = result.removed > 0 ? 5 : 0;
-  // 2라인 승리 보너스 (라인승 2개 확보 시 큰 가산점)
-  const lw = lineWinCounts(test);
-  const has2WinsBonus = (owner === 'me' ? lw.me : lw.opp) >= 2 ? 8 : 0;
+  // --- 라인 승리 변화 ---
+  const lineWinDelta = (myLineWins - oppLineWins) - (myLineWinsBefore - oppLineWinsBefore);
 
-  return sign * (20 * lineWinDiff + lineValue + extraBonus + has2WinsBonus);
+  // --- 2라인 확보 보너스 (절대 목표) ---
+  let strategicBonus = 0;
+  if (myLineWins >= 2) strategicBonus += 50;  // 내가 2라인 → 거의 승리 확정
+  if (oppLineWins >= 2) strategicBonus -= 50; // 상대가 2라인 → 거의 패배
+
+  // 3라인 확보(완승) 추가 보너스
+  if (myLineWins === 3) strategicBonus += 10;
+  if (oppLineWins === 3) strategicBonus -= 10;
+
+  // --- 알까기 가치 ---
+  // 점수 손실 + 보너스 주사위 (실드)
+  const knockoffBonus = result.removed > 0 ? (8 + result.removed * 3) : 0;
+
+  // --- 알까기 위협 회피 (다음 턴 손실 기대값) ---
+  // me 입장: 내 영역의 위협 - 상대 영역의 위협
+  let threatBefore = 0, threatAfter = 0;
+  for (let i = 0; i < 3; i++) {
+    threatBefore += knockoffThreat(s, 'me', i) - knockoffThreat(s, 'opp', i);
+    threatAfter += knockoffThreat(test, 'me', i) - knockoffThreat(test, 'opp', i);
+  }
+  // me 입장 위협 증가 = 마이너스
+  const threatDelta = -(threatAfter - threatBefore);
+
+  // --- 실드 가치 보존 ---
+  // 실드 주사위를 일반 라인에 두면 알까기 위협 0인 안전한 점수원
+  const shieldValue = die.shield && !result.selfRemoved ? 4 : 0;
+
+  // --- 슬롯 잠금 가치 (영역이 가득 차면 그 영역 점수 확정) ---
+  // 가득 찬 영역이 내 우세면 +5, 상대 우세면 -5
+  let lockValue = 0;
+  for (let i = 0; i < 3; i++) {
+    if (test.me[i].length === MAX_DICE_PER_LINE) {
+      const sc = lineScoreByOwner(test.me[i], test.opp[i]);
+      if (sc.me > sc.opp) lockValue += 3;
+    }
+    if (test.opp[i].length === MAX_DICE_PER_LINE) {
+      const sc = lineScoreByOwner(test.me[i], test.opp[i]);
+      if (sc.opp > sc.me) lockValue -= 3;
+    }
+  }
+
+  // --- cross-place (상대 영역 배치) 페널티 ---
+  // 점수가 상대에게 가므로 슬롯 차단 가치를 능가해야 의미 있음
+  let crossPenalty = 0;
+  if (owner !== placeArea) {
+    // 상대 영역 점수 증가분만큼 페널티 (단, 알까기로 사라지면 페널티 없음)
+    if (!result.selfRemoved) {
+      const oppArea = placeArea;
+      const before = lineScoreS(s[oppArea][lineIdx]);
+      const after = lineScoreS(test[oppArea][lineIdx]);
+      crossPenalty = -(after - before) * 1.5;  // 가중치 1.5로 강조
+    }
+  }
+
+  return sign * (
+    40 * lineWinDelta +
+    strategicBonus +
+    lineValue +
+    knockoffBonus +
+    threatDelta * 0.8 +
+    shieldValue +
+    lockValue +
+    crossPenalty
+  );
 }
 
 function placementReasons(s, owner, placeArea, lineIdx, die) {
@@ -1217,22 +1321,38 @@ function simulateRandom(initialState, numSims, nextTurn) {
 
       const die = { val, shield, owner: side };
 
-      // Pick line (시뮬레이션에서는 자기 영역만 — 상대 영역 배치는 휴리스틱 복잡도 줄이기)
-      let chosen;
+      // Pick line: 자기 영역 + cross-place(보너스 주사위만)
+      // 1성은 랜덤, 2/3성은 휴리스틱
+      let chosen, chosenArea;
+      const enemyArea = side === 'me' ? 'opp' : 'me';
+
       if (side === 'opp' && oppLevel === 1) {
         const avail = [0,1,2].filter(i => s[side][i].length < MAX_DICE_PER_LINE);
         chosen = avail[(Math.random() * avail.length) | 0];
+        chosenArea = side;
       } else {
-        let bestScore = -Infinity, bestLines = [];
+        let bestScore = -Infinity, bestMoves = [];
+        // 자기 영역 후보
         for (let i = 0; i < 3; i++) {
           if (s[side][i].length >= MAX_DICE_PER_LINE) continue;
           const ev = evaluatePlacement(s, side, side, i, die);
-          if (ev > bestScore) { bestScore = ev; bestLines = [i]; }
-          else if (ev === bestScore) bestLines.push(i);
+          if (ev > bestScore) { bestScore = ev; bestMoves = [{ line: i, area: side }]; }
+          else if (ev === bestScore) bestMoves.push({ line: i, area: side });
         }
-        chosen = bestLines[(Math.random() * bestLines.length) | 0];
+        // 보너스 주사위(실드)는 상대 영역도 시도
+        if (extraTurn) {
+          for (let i = 0; i < 3; i++) {
+            if (s[enemyArea][i].length >= MAX_DICE_PER_LINE) continue;
+            const ev = evaluatePlacement(s, side, enemyArea, i, die);
+            if (ev > bestScore) { bestScore = ev; bestMoves = [{ line: i, area: enemyArea }]; }
+            else if (ev === bestScore) bestMoves.push({ line: i, area: enemyArea });
+          }
+        }
+        const pick = bestMoves[(Math.random() * bestMoves.length) | 0];
+        chosen = pick.line;
+        chosenArea = pick.area;
       }
-      const result = placeDie(s, side, side, chosen, die);
+      const result = placeDie(s, side, chosenArea, chosen, die);
 
       // 알까기 성공 → 같은 플레이어 추가 턴 (실드 주사위)
       if (result.removed > 0) {
@@ -1852,6 +1972,8 @@ document.getElementById('undoBtn').addEventListener('click', () => {
 document.getElementById('simCount').addEventListener('input', e => {
   document.getElementById('simCountLabel').textContent = e.target.value;
 });
+// 초기 라벨 동기화
+document.getElementById('simCountLabel').textContent = document.getElementById('simCount').value;
 document.getElementById('simCount').addEventListener('change', () => render());
 document.getElementById('oppLevel').addEventListener('change', () => render());
 
