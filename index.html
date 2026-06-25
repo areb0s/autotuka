@@ -481,22 +481,52 @@
     margin-bottom: 8px;
   }
   .picker button {
-    background: linear-gradient(135deg, #6b4226 0%, #4a2e1f 100%);
-    border: 1px solid var(--gold);
-    color: var(--gold-bright);
-    padding: 10px 0;
+    background: linear-gradient(135deg, #f5e8d0 0%, #d4c0a0 100%);
+    border: 2px solid #8a6440;
+    padding: 8px;
     border-radius: 6px;
     cursor: pointer;
-    font-weight: bold;
-    font-size: 16px;
-    font-family: "Georgia", serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    box-shadow:
+      inset 2px 2px 0 rgba(255,255,255,0.4),
+      inset -2px -2px 0 rgba(0,0,0,0.15),
+      2px 2px 3px rgba(0,0,0,0.4);
+    transition: all 0.15s;
   }
-  .picker button:hover { background: linear-gradient(135deg, #8a5430 0%, #6b4226 100%); }
+  .picker button .pick-pips {
+    display: grid;
+    grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+    gap: 3px;
+    width: 100%;
+    height: 100%;
+  }
+  .picker button .pick-pips .pip {
+    background: #2a1a10;
+    border-radius: 50%;
+    width: 100%;
+    height: 100%;
+  }
+  .picker button:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      inset 2px 2px 0 rgba(255,255,255,0.4),
+      inset -2px -2px 0 rgba(0,0,0,0.15),
+      3px 4px 6px rgba(0,0,0,0.5),
+      0 0 12px rgba(244,208,137,0.4);
+  }
   .picker button.active {
     background: linear-gradient(135deg, var(--gold-bright) 0%, var(--gold) 100%);
-    color: #2a1a10;
-    box-shadow: 0 0 10px rgba(244,208,137,0.6);
+    border-color: #2a1a10;
+    box-shadow:
+      inset 2px 2px 0 rgba(255,255,255,0.6),
+      inset -2px -2px 0 rgba(0,0,0,0.2),
+      0 0 15px rgba(244,208,137,0.8);
+    transform: translateY(-1px);
   }
+  .picker button.active .pip { background: #2a1a10; }
 
   .shield-row {
     display: flex;
@@ -790,14 +820,7 @@
         <button data-mode="me" class="active">내 주사위</button>
         <button data-mode="opp">상대 주사위</button>
       </div>
-      <div class="picker" id="picker">
-        <button data-val="1">⚀</button>
-        <button data-val="2">⚁</button>
-        <button data-val="3">⚂</button>
-        <button data-val="4">⚃</button>
-        <button data-val="5">⚄</button>
-        <button data-val="6">⚅</button>
-      </div>
+      <div class="picker" id="picker"></div>
       <div class="shield-row">
         <label><input type="checkbox" id="shieldCheck" /> 🛡️ 실드 주사위</label>
         <span class="badge" id="modeBadge">내 차례</span>
@@ -1952,13 +1975,37 @@ function placeAtLine(clickedArea, lineIdx) {
    EVENT BINDINGS
    ========================================================= */
 
-document.querySelectorAll('#picker button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('#picker button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    state.currentDie = parseInt(btn.dataset.val);
-    render();
-  });
+// 주사위 픽커 버튼 동적 생성 (pip 그래픽만)
+function buildPicker() {
+  const picker = document.getElementById('picker');
+  picker.innerHTML = '';
+  for (let v = 1; v <= 6; v++) {
+    const btn = document.createElement('button');
+    btn.dataset.val = v;
+    btn.title = `주사위 ${v}`;
+
+    const pips = document.createElement('div');
+    pips.className = 'pick-pips';
+    const positions = pipPositions(v);
+    for (let i = 0; i < 9; i++) {
+      const cell = document.createElement('div');
+      if (positions.includes(i)) cell.className = 'pip';
+      pips.appendChild(cell);
+    }
+    btn.appendChild(pips);
+    picker.appendChild(btn);
+  }
+}
+buildPicker();
+
+// 이벤트 위임 (동적 생성된 버튼에도 작동)
+document.getElementById('picker').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-val]');
+  if (!btn) return;
+  document.querySelectorAll('#picker button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.currentDie = parseInt(btn.dataset.val);
+  render();
 });
 
 document.getElementById('shieldCheck').addEventListener('change', e => {
