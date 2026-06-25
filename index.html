@@ -1156,6 +1156,52 @@ function evaluatePlacement(s, owner, placeArea, lineIdx, die) {
   return val;
 }
 
+/* ---------- Deep heuristic with 1-ply lookahead (for recommendation only)
+   = 내 수 적용 후 staticEval(owner) + 상대 응수 후 평균 staticEval(owner) 보정
+   - 즉, 내가 좋게 한 후 상대가 망쳐도 얼마나 좋은가
+*/
+function deepEval(s, owner, placeArea, lineIdx, die) {
+  const enemy = owner === 'me' ? 'opp' : 'me';
+  const afterMyMove = cloneState(s);
+  const result = placeDie(afterMyMove, owner, placeArea, lineIdx, { ...die, owner });
+
+  if (isGameOver(afterMyMove)) {
+    return staticEval(afterMyMove, owner);
+  }
+  if (result.removed > 0) {
+    return staticEval(afterMyMove, owner) + 12 + result.removed * 4;
+  }
+
+  // 상대가 각 면에서 최선 응수했을 때, 그 결과의 owner 가치 평균
+  // (상대는 자기 evaluatePlacement로 best 선택 → 결과 상태의 staticEval(owner))
+  let avgOwnerValueAfterEnemy = 0;
+  let validVals = 0;
+  for (let v = 1; v <= 6; v++) {
+    const eDie = { val: v, shield: false, owner: enemy };
+    let bestEnemyScore = -Infinity;
+    let bestEnemyState = null;
+    for (let li = 0; li < 3; li++) {
+      if (afterMyMove[enemy][li].length >= MAX_DICE_PER_LINE) continue;
+      const evForEnemy = evaluatePlacement(afterMyMove, enemy, enemy, li, eDie);
+      if (evForEnemy > bestEnemyScore) {
+        bestEnemyScore = evForEnemy;
+        // 그 상태를 만들기 위해 placeDie 다시 적용
+        const next = cloneState(afterMyMove);
+        placeDie(next, enemy, enemy, li, { ...eDie });
+        bestEnemyState = next;
+      }
+    }
+    if (bestEnemyState) {
+      avgOwnerValueAfterEnemy += staticEval(bestEnemyState, owner);
+      validVals++;
+    }
+  }
+  if (validVals === 0) {
+    return staticEval(afterMyMove, owner);
+  }
+  return avgOwnerValueAfterEnemy / validVals;
+}
+
 /* ---------- Best move selection (greedy with heuristic) ---------- */
 function bestMoveForSide(s, side, die, extraTurn) {
   const enemyArea = side === 'me' ? 'opp' : 'me';
@@ -1266,11 +1312,21 @@ function placementReasons(s, owner, placeArea, lineIdx, die) {
   return reasons;
 }
 
-/* ---------- Monte Carlo simulation (v4: 정확성 + 속도) ---------- */
+/* ---------- Monte Carlo simulation (v5)
+   핵심:
+   - 나는 항상 휴리스틱(강한 플레이)
+   - 상대는 oppLevel에 따라 강도 조정
+     * 1성: 80% 랜덤 + 20% 휴리스틱
+     * 2성: 50% 랜덤 + 50% 휴리스틱 (혼합)
+     * 3성: 휴리스틱 + 리롤 적극 사용
+   - 이렇게 해야 시뮬에서 내 알고리즘 우위가 보임
+*/
 function simulateRandom(initialState, numSims, nextTurn) {
   let meWin = 0, tie = 0;
   const oppLevelEl = document.getElementById('oppLevel');
   const oppLevel = oppLevelEl ? parseInt(oppLevelEl.value) : 2;
+  // 상대 강도 (1성/2성/3성)
+  const oppNoise = oppLevel === 1 ? 0.7 : oppLevel === 2 ? 0.35 : 0.05;
 
   for (let sim = 0; sim < numSims; sim++) {
     const s = cloneState(initialState);
@@ -1286,7 +1342,6 @@ function simulateRandom(initialState, numSims, nextTurn) {
       const hasSpaceOwn = s[side].some(line => line.length < MAX_DICE_PER_LINE);
       const hasSpaceEnemy = s[enemyArea].some(line => line.length < MAX_DICE_PER_LINE);
 
-      // 자기 영역도 없고 보너스/상대 영역도 없으면 턴 넘김
       if (!hasSpaceOwn && (!extraTurn || !hasSpaceEnemy)) {
         if (extraTurn) extraTurn = false;
         side = side === 'me' ? 'opp' : 'me';
@@ -1296,16 +1351,19 @@ function simulateRandom(initialState, numSims, nextTurn) {
       let val = 1 + (Math.random() * 6) | 0;
       const shield = extraTurn;
 
-      // 리롤: 약한 주사위(1~2)이고 알까기 못하면 사용
+      // 리롤 정책
+      const rerollAggro = side === 'me' ? 0.5 :
+                          oppLevel === 3 ? 0.6 :
+                          oppLevel === 2 ? 0.3 : 0.1;
       if (!extraTurn && rerollLeft[side] > 0 && val <= 2) {
-        // 빠른 체크: 알까기 가능한 라인 있는지
+        // 알까기 가능한지 빠른 체크
         let canKnockoff = false;
         for (let i = 0; i < 3; i++) {
           if (s[enemyArea][i].some(d => d.val === val && !d.shield)) {
             canKnockoff = true; break;
           }
         }
-        if (!canKnockoff) {
+        if (!canKnockoff && Math.random() < rerollAggro) {
           rerollLeft[side]--;
           val = 1 + (Math.random() * 6) | 0;
         }
@@ -1313,10 +1371,12 @@ function simulateRandom(initialState, numSims, nextTurn) {
 
       const die = { val, shield, owner: side };
 
-      // 수 선택
+      // 수 선택: side가 me면 무조건 휴리스틱, opp면 noise 확률로 랜덤
       let chosen, chosenArea;
-      if (side === 'opp' && oppLevel === 1) {
-        // 1성: 랜덤
+      const useRandom = side === 'opp' && Math.random() < oppNoise;
+
+      if (useRandom) {
+        // 랜덤 (자기 영역만)
         const avail = [];
         for (let i = 0; i < 3; i++) {
           if (s[side][i].length < MAX_DICE_PER_LINE) avail.push(i);
@@ -1328,7 +1388,7 @@ function simulateRandom(initialState, numSims, nextTurn) {
         chosen = avail[(Math.random() * avail.length) | 0];
         chosenArea = side;
       } else {
-        // 2/3성: 휴리스틱 (greedy)
+        // 휴리스틱
         let bestScore = -Infinity, bestMoves = [];
         if (hasSpaceOwn) {
           for (let i = 0; i < 3; i++) {
@@ -1377,12 +1437,12 @@ function evaluateAllMyMoves() {
   const numSims = parseInt(document.getElementById('simCount').value);
   const moves = [];
 
-  // 내 영역에 배치
+  // 내 영역에 배치 (deepEval = 1-ply lookahead)
   for (let i = 0; i < 3; i++) {
     if (state.me[i].length >= MAX_DICE_PER_LINE) continue;
     const post = cloneState(state);
     const result = placeDie(post, 'me', 'me', i, { ...die });
-    const heuristic = evaluatePlacement(state, 'me', 'me', i, die);
+    const heuristic = deepEval(state, 'me', 'me', i, die);
     const nextTurn = result.removed > 0 ? 'me' : 'opp';
     const winrate = simulateRandom(post, numSims, nextTurn);
     const reasons = placementReasons(state, 'me', 'me', i, die);
@@ -1395,11 +1455,24 @@ function evaluateAllMyMoves() {
       if (state.opp[i].length >= MAX_DICE_PER_LINE) continue;
       const post = cloneState(state);
       const result = placeDie(post, 'me', 'opp', i, { ...die });
-      const heuristic = evaluatePlacement(state, 'me', 'opp', i, die);
+      const heuristic = deepEval(state, 'me', 'opp', i, die);
       const nextTurn = result.removed > 0 ? 'me' : 'opp';
       const winrate = simulateRandom(post, numSims, nextTurn);
       const reasons = placementReasons(state, 'me', 'opp', i, die);
       moves.push({ line: i, target: 'cross', placeArea: 'opp', heuristic, winrate, reasons });
+    }
+  }
+
+  // ⭐ 최종 점수 = 시뮬 승률 + 휴리스틱 작은 보너스 (동률 깨기)
+  // 휴리스틱은 정규화해서 작은 가중치 부여
+  if (moves.length > 0) {
+    const maxH = Math.max(...moves.map(m => Math.abs(m.heuristic)));
+    if (maxH > 0) {
+      for (const m of moves) {
+        m.combinedScore = m.winrate + (m.heuristic / maxH) * 0.02;
+      }
+    } else {
+      for (const m of moves) m.combinedScore = m.winrate;
     }
   }
 
@@ -1465,7 +1538,8 @@ function evaluateAllMyMoves() {
     });
   }
 
-  moves.sort((a, b) => b.winrate - a.winrate);
+  // 정렬: combinedScore (시뮬 승률 + 휴리스틱 보너스) 기준
+  moves.sort((a, b) => (b.combinedScore || b.winrate) - (a.combinedScore || a.winrate));
   return moves;
 }
 
