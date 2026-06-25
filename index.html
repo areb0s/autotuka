@@ -1072,111 +1072,115 @@ function knockoffThreat(s, side, lineIdx) {
   return threat;
 }
 
+/* ============================================================
+   STRATEGY ENGINE v4 - Strong & Fast
+   ============================================================
+   Key insights:
+   - 게임은 운빨 큼 but 결정점이 있음: 라인 죽이기/살리기, 알까기 타이밍
+   - 휴리스틱은 빠르고 좋은 신호 제공 (게임 종료 = 가장 강한 신호)
+   - MCTS-style: 휴리스틱으로 시뮬 빠르게 → 더 많이 돌려 평균
+   - 1-step lookahead는 시뮬 안에선 너무 느림 (O(n^2)) → 시뮬은 휴리스틱만
+*/
+
+/* ---------- Fast static evaluation (~1μs) ----------
+   owner 관점 양수=좋음. 게임 종료 시 압도적 신호.
+*/
+function staticEval(s, owner) {
+  const enemy = owner === 'me' ? 'opp' : 'me';
+  let scoreDiff = 0;
+  let myWins = 0, enemyWins = 0;
+  let myTotal = 0, enemyTotal = 0;
+  let allFull = true;
+
+  for (let i = 0; i < 3; i++) {
+    if (s.me[i].length < MAX_DICE_PER_LINE) allFull = false;
+    if (s.opp[i].length < MAX_DICE_PER_LINE) allFull = false;
+    const sc = lineScoreByOwner(s.me[i], s.opp[i]);
+    const own = sc[owner], en = sc[enemy];
+    scoreDiff += own - en;
+    myTotal += own; enemyTotal += en;
+    if (own > en) myWins++;
+    else if (en > own) enemyWins++;
+  }
+
+  // 게임 종료: 라인승으로 결정, 동률은 총점
+  if (allFull) {
+    if (myWins > enemyWins) return 1000;
+    if (enemyWins > myWins) return -1000;
+    if (myTotal > enemyTotal) return 500;
+    if (enemyTotal > myTotal) return -500;
+    return 0;
+  }
+
+  // 게임 진행 중: 라인 승 신호 × 35, 2라인 우세 큰 보너스, 점수차 보조
+  let bonus = (myWins - enemyWins) * 35;
+  if (myWins >= 2) bonus += 60;
+  if (enemyWins >= 2) bonus -= 60;
+  return scoreDiff + bonus;
+}
+
+/* ---------- placeDie 결과 평가 ----------
+   각 수에 대한 정적 점수 (1-ply, no lookahead)
+   - 휴리스틱 자체는 빠르게, 시뮬레이션 안에서도 사용
+*/
 function evaluatePlacement(s, owner, placeArea, lineIdx, die) {
   const test = cloneState(s);
   const testDie = { ...die, owner };
   const result = placeDie(test, owner, placeArea, lineIdx, testDie);
-  const sign = owner === 'me' ? 1 : -1;
 
-  // --- 라인별 평가 ---
-  let lineValue = 0;
-  let myLineWins = 0, oppLineWins = 0;
-  let myLineWinsBefore = 0, oppLineWinsBefore = 0;
+  // 게임 종료시 바로 결과
+  if (isGameOver(test)) {
+    return staticEval(test, owner);
+  }
 
+  let val = staticEval(test, owner);
+
+  // 알까기 = 추가 주사위(실드) 가치 (평균적으로 +5점)
+  if (result.removed > 0) {
+    val += 8 + result.removed * 3;
+  }
+
+  // cross-place: 상대 영역 점수 증가는 실제로 손해
+  // (staticEval에서 이미 반영되지만, 슬롯 차단 가치는 추가 보너스)
+  if (owner !== placeArea && !result.selfRemoved) {
+    const enemyArea = placeArea;
+    const remainSlots = MAX_DICE_PER_LINE - test[enemyArea][lineIdx].length;
+    if (remainSlots === 0) {
+      // 상대 영역 완전 차단 - 그 라인 결정 확정
+      const sc = lineScoreByOwner(test.me[lineIdx], test.opp[lineIdx]);
+      const enemy = owner === 'me' ? 'opp' : 'me';
+      if (sc[owner] > sc[enemy]) val += 20;  // 차단 + 우세 = 라인 굳히기
+    }
+  }
+
+  return val;
+}
+
+/* ---------- Best move selection (greedy with heuristic) ---------- */
+function bestMoveForSide(s, side, die, extraTurn) {
+  const enemyArea = side === 'me' ? 'opp' : 'me';
+  let bestScore = -Infinity;
+  let bestMoves = [];
+
+  // 자기 영역
   for (let i = 0; i < 3; i++) {
-    const beforeViab = lineViability(s.me[i], s.opp[i]);
-    const afterViab = lineViability(test.me[i], test.opp[i]);
-    const beforeOwner = lineWonBy(beforeViab.sc);
-    const afterOwner = lineWonBy(afterViab.sc);
-
-    if (beforeOwner === 'me') myLineWinsBefore++;
-    else if (beforeOwner === 'opp') oppLineWinsBefore++;
-    if (afterOwner === 'me') myLineWins++;
-    else if (afterOwner === 'opp') oppLineWins++;
-
-    // 점수 변화 (me 입장)
-    const beforeDiff = beforeViab.sc.me - beforeViab.sc.opp;
-    const afterDiff = afterViab.sc.me - afterViab.sc.opp;
-    const delta = afterDiff - beforeDiff;
-
-    // 라인 가치 가중치
-    let weight;
-    if (afterViab.meDead || afterViab.oppDead) {
-      weight = 0.05;  // 죽은 라인 거의 무시
-    } else {
-      // 경합도(0~1)에 비례, 최소 0.5
-      weight = 0.5 + afterViab.closeness * 2.5;
-    }
-    lineValue += delta * weight;
+    if (s[side][i].length >= MAX_DICE_PER_LINE) continue;
+    const ev = evaluatePlacement(s, side, side, i, die);
+    if (ev > bestScore) { bestScore = ev; bestMoves = [{ line: i, area: side }]; }
+    else if (ev === bestScore) bestMoves.push({ line: i, area: side });
   }
-
-  // --- 라인 승리 변화 ---
-  const lineWinDelta = (myLineWins - oppLineWins) - (myLineWinsBefore - oppLineWinsBefore);
-
-  // --- 2라인 확보 보너스 (절대 목표) ---
-  let strategicBonus = 0;
-  if (myLineWins >= 2) strategicBonus += 50;  // 내가 2라인 → 거의 승리 확정
-  if (oppLineWins >= 2) strategicBonus -= 50; // 상대가 2라인 → 거의 패배
-
-  // 3라인 확보(완승) 추가 보너스
-  if (myLineWins === 3) strategicBonus += 10;
-  if (oppLineWins === 3) strategicBonus -= 10;
-
-  // --- 알까기 가치 ---
-  // 점수 손실 + 보너스 주사위 (실드)
-  const knockoffBonus = result.removed > 0 ? (8 + result.removed * 3) : 0;
-
-  // --- 알까기 위협 회피 (다음 턴 손실 기대값) ---
-  // me 입장: 내 영역의 위협 - 상대 영역의 위협
-  let threatBefore = 0, threatAfter = 0;
-  for (let i = 0; i < 3; i++) {
-    threatBefore += knockoffThreat(s, 'me', i) - knockoffThreat(s, 'opp', i);
-    threatAfter += knockoffThreat(test, 'me', i) - knockoffThreat(test, 'opp', i);
-  }
-  // me 입장 위협 증가 = 마이너스
-  const threatDelta = -(threatAfter - threatBefore);
-
-  // --- 실드 가치 보존 ---
-  // 실드 주사위를 일반 라인에 두면 알까기 위협 0인 안전한 점수원
-  const shieldValue = die.shield && !result.selfRemoved ? 4 : 0;
-
-  // --- 슬롯 잠금 가치 (영역이 가득 차면 그 영역 점수 확정) ---
-  // 가득 찬 영역이 내 우세면 +5, 상대 우세면 -5
-  let lockValue = 0;
-  for (let i = 0; i < 3; i++) {
-    if (test.me[i].length === MAX_DICE_PER_LINE) {
-      const sc = lineScoreByOwner(test.me[i], test.opp[i]);
-      if (sc.me > sc.opp) lockValue += 3;
-    }
-    if (test.opp[i].length === MAX_DICE_PER_LINE) {
-      const sc = lineScoreByOwner(test.me[i], test.opp[i]);
-      if (sc.opp > sc.me) lockValue -= 3;
+  // 보너스 주사위는 상대 영역도 시도
+  if (extraTurn) {
+    for (let i = 0; i < 3; i++) {
+      if (s[enemyArea][i].length >= MAX_DICE_PER_LINE) continue;
+      const ev = evaluatePlacement(s, side, enemyArea, i, die);
+      if (ev > bestScore) { bestScore = ev; bestMoves = [{ line: i, area: enemyArea }]; }
+      else if (ev === bestScore) bestMoves.push({ line: i, area: enemyArea });
     }
   }
-
-  // --- cross-place (상대 영역 배치) 페널티 ---
-  // 점수가 상대에게 가므로 슬롯 차단 가치를 능가해야 의미 있음
-  let crossPenalty = 0;
-  if (owner !== placeArea) {
-    // 상대 영역 점수 증가분만큼 페널티 (단, 알까기로 사라지면 페널티 없음)
-    if (!result.selfRemoved) {
-      const oppArea = placeArea;
-      const before = lineScoreS(s[oppArea][lineIdx]);
-      const after = lineScoreS(test[oppArea][lineIdx]);
-      crossPenalty = -(after - before) * 1.5;  // 가중치 1.5로 강조
-    }
-  }
-
-  return sign * (
-    40 * lineWinDelta +
-    strategicBonus +
-    lineValue +
-    knockoffBonus +
-    threatDelta * 0.8 +
-    shieldValue +
-    lockValue +
-    crossPenalty
-  );
+  if (bestMoves.length === 0) return null;
+  // 타이브레이크: 첫 번째 (결정성)
+  return bestMoves[0];
 }
 
 function placementReasons(s, owner, placeArea, lineIdx, die) {
@@ -1262,58 +1266,46 @@ function placementReasons(s, owner, placeArea, lineIdx, die) {
   return reasons;
 }
 
-/* ---------- Monte Carlo simulation ---------- */
+/* ---------- Monte Carlo simulation (v4: 정확성 + 속도) ---------- */
 function simulateRandom(initialState, numSims, nextTurn) {
   let meWin = 0, tie = 0;
-  const oppLevel = parseInt(document.getElementById('oppLevel').value);
+  const oppLevelEl = document.getElementById('oppLevel');
+  const oppLevel = oppLevelEl ? parseInt(oppLevelEl.value) : 2;
 
   for (let sim = 0; sim < numSims; sim++) {
     const s = cloneState(initialState);
-    // 시뮬레이션 내부에서 리롤 잔량 추적 (initialState에서 복사)
     const rerollLeft = initialState.rerollLeft
       ? { ...initialState.rerollLeft }
       : { me: 1, opp: 1 };
     let side = nextTurn;
     let safety = 80;
-    let extraTurn = false;  // 알까기 보너스 턴
+    let extraTurn = false;
 
     while (!isGameOver(s) && safety-- > 0) {
-      const hasSpace = s[side].some(line => line.length < MAX_DICE_PER_LINE);
-      if (!hasSpace) {
-        if (extraTurn) { extraTurn = false; continue; }
+      const enemyArea = side === 'me' ? 'opp' : 'me';
+      const hasSpaceOwn = s[side].some(line => line.length < MAX_DICE_PER_LINE);
+      const hasSpaceEnemy = s[enemyArea].some(line => line.length < MAX_DICE_PER_LINE);
+
+      // 자기 영역도 없고 보너스/상대 영역도 없으면 턴 넘김
+      if (!hasSpaceOwn && (!extraTurn || !hasSpaceEnemy)) {
+        if (extraTurn) extraTurn = false;
         side = side === 'me' ? 'opp' : 'me';
         continue;
       }
 
       let val = 1 + (Math.random() * 6) | 0;
-      // 보너스 주사위는 항상 실드
-      const shield = extraTurn ? true : Math.random() < 0.05;
+      const shield = extraTurn;
 
-      // ⭐ 리롤 사용 정책 (시뮬레이션 NPC)
-      // - 보너스 주사위(실드)는 리롤 안 함
-      // - 주사위 자체 가치 + 현재 배치 가치를 함께 평가
-      // - 게임 후반일수록 적극적으로 사용
-      if (!extraTurn && rerollLeft[side] > 0) {
-        // 현재 진행도
-        let placedNow = 0;
-        for (let i = 0; i < 3; i++) placedNow += s.me[i].length + s.opp[i].length;
-        const progress = placedNow / 18;
-
-        // 둘 곳 평가: 현재 주사위로 둘 수 있는 최고 휴리스틱
-        const tmpDie = { val, shield, owner: side };
-        let bestEv = -Infinity;
+      // 리롤: 약한 주사위(1~2)이고 알까기 못하면 사용
+      if (!extraTurn && rerollLeft[side] > 0 && val <= 2) {
+        // 빠른 체크: 알까기 가능한 라인 있는지
+        let canKnockoff = false;
         for (let i = 0; i < 3; i++) {
-          if (s[side][i].length >= MAX_DICE_PER_LINE) continue;
-          const ev = evaluatePlacement(s, side, side, i, tmpDie);
-          if (ev > bestEv) bestEv = ev;
+          if (s[enemyArea][i].some(d => d.val === val && !d.shield)) {
+            canKnockoff = true; break;
+          }
         }
-        // bestEv가 낮을 때 (0 미만 = 나쁜 수밖에 없음) 리롤
-        // 초반엔 조심스럽게 (낮은 임계값), 후반엔 적극적으로
-        const threshold = progress < 0.3 ? -3 : progress < 0.7 ? 0 : 3;
-        const shouldReroll = bestEv < threshold;
-        // 3성 NPC는 좀 더 적극적
-        const aggressionBoost = (side === 'opp' && oppLevel === 3) ? 2 : 0;
-        if (shouldReroll || (bestEv < threshold + aggressionBoost)) {
+        if (!canKnockoff) {
           rerollLeft[side]--;
           val = 1 + (Math.random() * 6) | 0;
         }
@@ -1321,26 +1313,32 @@ function simulateRandom(initialState, numSims, nextTurn) {
 
       const die = { val, shield, owner: side };
 
-      // Pick line: 자기 영역 + cross-place(보너스 주사위만)
-      // 1성은 랜덤, 2/3성은 휴리스틱
+      // 수 선택
       let chosen, chosenArea;
-      const enemyArea = side === 'me' ? 'opp' : 'me';
-
       if (side === 'opp' && oppLevel === 1) {
-        const avail = [0,1,2].filter(i => s[side][i].length < MAX_DICE_PER_LINE);
+        // 1성: 랜덤
+        const avail = [];
+        for (let i = 0; i < 3; i++) {
+          if (s[side][i].length < MAX_DICE_PER_LINE) avail.push(i);
+        }
+        if (avail.length === 0) {
+          side = side === 'me' ? 'opp' : 'me';
+          continue;
+        }
         chosen = avail[(Math.random() * avail.length) | 0];
         chosenArea = side;
       } else {
+        // 2/3성: 휴리스틱 (greedy)
         let bestScore = -Infinity, bestMoves = [];
-        // 자기 영역 후보
-        for (let i = 0; i < 3; i++) {
-          if (s[side][i].length >= MAX_DICE_PER_LINE) continue;
-          const ev = evaluatePlacement(s, side, side, i, die);
-          if (ev > bestScore) { bestScore = ev; bestMoves = [{ line: i, area: side }]; }
-          else if (ev === bestScore) bestMoves.push({ line: i, area: side });
+        if (hasSpaceOwn) {
+          for (let i = 0; i < 3; i++) {
+            if (s[side][i].length >= MAX_DICE_PER_LINE) continue;
+            const ev = evaluatePlacement(s, side, side, i, die);
+            if (ev > bestScore) { bestScore = ev; bestMoves = [{ line: i, area: side }]; }
+            else if (ev === bestScore) bestMoves.push({ line: i, area: side });
+          }
         }
-        // 보너스 주사위(실드)는 상대 영역도 시도
-        if (extraTurn) {
+        if (extraTurn && hasSpaceEnemy) {
           for (let i = 0; i < 3; i++) {
             if (s[enemyArea][i].length >= MAX_DICE_PER_LINE) continue;
             const ev = evaluatePlacement(s, side, enemyArea, i, die);
@@ -1348,13 +1346,17 @@ function simulateRandom(initialState, numSims, nextTurn) {
             else if (ev === bestScore) bestMoves.push({ line: i, area: enemyArea });
           }
         }
+        if (bestMoves.length === 0) {
+          if (extraTurn) extraTurn = false;
+          side = side === 'me' ? 'opp' : 'me';
+          continue;
+        }
         const pick = bestMoves[(Math.random() * bestMoves.length) | 0];
         chosen = pick.line;
         chosenArea = pick.area;
       }
       const result = placeDie(s, side, chosenArea, chosen, die);
 
-      // 알까기 성공 → 같은 플레이어 추가 턴 (실드 주사위)
       if (result.removed > 0) {
         extraTurn = true;
       } else {
